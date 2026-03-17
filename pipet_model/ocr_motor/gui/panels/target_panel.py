@@ -44,9 +44,16 @@ class TargetPanel(QGroupBox):
         layout.addWidget(self.status)
         self.setLayout(layout)
 
+    def _camera_index(self) -> int:
+        """VideoPanel에서 선택한 카메라 번호를 우선 사용하고, 없으면 0을 사용한다."""
+        panel = getattr(self.controller, "video_panel", None)
+        if panel is not None and hasattr(panel, "camera_spin"):
+            return int(panel.camera_spin.value())
+        return 0
+
     def on_read(self):
         """현재 눈금을 바로 읽어보고 싶을 때 사용하는 OCR 단발 호출이다."""
-        res = self.controller.ocr_read_volume(camera_index=0)
+        res = self.controller.ocr_read_volume(camera_index=self._camera_index())
         if not res.ok:
             self.status.setText("Status: OCR failed.")
             return
@@ -59,7 +66,7 @@ class TargetPanel(QGroupBox):
         """입력된 목표값 기준으로 자동 보정 루프를 시작한다."""
         t = int(self.target_spin.value())
         self.status.setText(f"Status: Running to target {t:04d} (see terminal logs)...")
-        self.controller.start_run_to_target(target=t, camera_index=0)
+        self.controller.start_run_to_target(target=t, camera_index=self._camera_index())
 
     def on_stop(self):
         """실행 중인 자동 보정 루프를 중단하고 화면 상태를 즉시 바꾼다."""
@@ -69,6 +76,9 @@ class TargetPanel(QGroupBox):
     def update_camera_frame(self):
         """예전에 직접 preview를 갱신하던 흔적으로, 현재 메인 흐름에서는 사용하지 않는다."""
         if not os.path.exists(FRAME_JPG_PATH):
+            return
+
+        if not hasattr(self, "camera_label"):
             return
 
         pixmap = QPixmap(FRAME_JPG_PATH)

@@ -36,6 +36,9 @@ class PipettePanel(QWidget):
 
         self._build_ui()
 
+        if hasattr(self.controller, "run_state_updated"):
+            self.controller.run_state_updated.connect(self._on_run_state_updated)
+
     # ==========================================================
     # UI
     # ==========================================================
@@ -141,36 +144,15 @@ class PipettePanel(QWidget):
     # ==========================================================
     def _toggle_pipetting(self):
         """흡인분주 축의 현재 상태를 기준으로 상/하 동작을 번갈아 수행한다."""
-        if not self._pipetting_down:
-            self.controller.pipetting_down()
-            self.btn_pip.setText("흡인분주 상승")
-        else:
-            self.controller.pipetting_up()
-            self.btn_pip.setText("흡인분주 하강")
-
-        self._pipetting_down = not self._pipetting_down
+        self._show_linear_toggle_unavailable()
 
     def _toggle_tip_change(self):
         """팁 교체 축의 현재 상태를 기준으로 상/하 동작을 번갈아 수행한다."""
-        if not self._tip_down:
-            self.controller.tip_change_down()
-            self.btn_tip.setText("팁 교체 상승")
-        else:
-            self.controller.tip_change_up()
-            self.btn_tip.setText("팁 교체 하강")
-
-        self._tip_down = not self._tip_down
+        self._show_linear_toggle_unavailable()
 
     def _toggle_volume_linear(self):
         """용량 조절 축의 현재 상태를 기준으로 상/하 동작을 번갈아 수행한다."""
-        if not self._volume_down:
-            self.controller.volume_down()
-            self.btn_vol.setText("용량 조절 상승")
-        else:
-            self.controller.volume_up()
-            self.btn_vol.setText("용량 조절 하강")
-
-        self._volume_down = not self._volume_down
+        self._show_linear_toggle_unavailable()
 
     # ==========================================================
     # Helpers
@@ -196,3 +178,15 @@ class PipettePanel(QWidget):
             self.volume_dc.run(direction=direction, duty=duty)
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+
+    def _show_linear_toggle_unavailable(self):
+        """미완성인 상/하 토글 기능은 예외 대신 안내 메시지로 막는다."""
+        QMessageBox.information(
+            self,
+            "안내",
+            "리니어 축 상/하 토글 기능은 아직 장비 위치값/통신 검증이 끝나지 않아 비활성 상태입니다."
+        )
+
+    def _on_run_state_updated(self, state: dict):
+        """자동 보정 실행 중에는 수동 조작 패널을 잠시 비활성화한다."""
+        self.setEnabled(not bool(state.get("running", False)))

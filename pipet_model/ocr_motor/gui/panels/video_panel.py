@@ -68,6 +68,20 @@ class VideoPanel(QGroupBox):
             )
         )
 
+    def show_pixmap(self, pixmap: QPixmap):
+        """메모리 상의 pixmap 결과를 preview 영역에 바로 표시한다."""
+        if pixmap.isNull():
+            self.video_label.setText("Image not found.")
+            return
+
+        self.video_label.setPixmap(
+            pixmap.scaled(
+                self.video_label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+        )
+
     def on_capture(self):
         """운영자가 직접 프레임 1장을 다시 캡처하고 싶을 때 호출된다."""
         cam = int(self.camera_spin.value())

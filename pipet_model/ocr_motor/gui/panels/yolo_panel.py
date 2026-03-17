@@ -59,7 +59,7 @@ class YoloPanel(QGroupBox):
             )
         )
 
-        frame_path = res.data.get("frame_path")
+        frame_path = res.data.get("annotated_path") or res.data.get("frame_path")
         if frame_path and os.path.exists(frame_path):
             self.show_fixed_rois(frame_path, fixed_rois)
 

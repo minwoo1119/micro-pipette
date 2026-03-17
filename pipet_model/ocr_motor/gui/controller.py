@@ -149,7 +149,17 @@ class Controller(QObject):
         res = self._run_worker(["--ocr", f"--camera={camera_index}"], 120)
         if res.ok:
             self.refresh_camera_view()
+            if self.video_panel and "volume" in res.data:
+                self.video_panel.set_latest_volume(int(res.data["volume"]))
         return res
+
+    def linear_move(self, actuator_id: int, position: int):
+        """입력값 기반 수동 이동 기능에서 사용하는 범용 리니어 이동 메서드다."""
+        if actuator_id == 0x0A:
+            return self.volume_linear.move_to(position)
+        if actuator_id == 0x0B:
+            return self.pipetting_linear.move_to(position)
+        raise ValueError(f"Unsupported actuator id: {hex(int(actuator_id))}")
 
     def start_run_to_target(self, target: int, camera_index: int = 0) -> None:
         """Run To Target 버튼이 Paddle 테스트 스크립트를 실행하도록 연결한 진입점이다."""
@@ -218,6 +228,8 @@ class Controller(QObject):
                     ) if msg.get("final_ul") is not None else self.run_state["error"],
                     "status": "Done" if msg.get("success") else msg.get("reason", "Failed"),
                 })
+                if self.video_panel and msg.get("final_ul") is not None:
+                    self.video_panel.set_latest_volume(int(msg["final_ul"]))
                 self.run_state_updated.emit(dict(self.run_state))
                 continue
 
@@ -233,6 +245,8 @@ class Controller(QObject):
                     "error": err,
                     "status": "Running",
                 })
+                if self.video_panel:
+                    self.video_panel.set_latest_volume(cur)
                 self.run_state_updated.emit(dict(self.run_state))
                 continue
 
