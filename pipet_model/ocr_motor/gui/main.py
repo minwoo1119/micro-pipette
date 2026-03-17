@@ -1,3 +1,5 @@
+"""피펫 제어 GUI를 실행하기 위한 PyQt 시작점입니다."""
+
 import sys
 from PyQt5.QtWidgets import QApplication
 from gui.main_window import MainWindow
