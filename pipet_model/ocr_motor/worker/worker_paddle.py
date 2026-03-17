@@ -1,4 +1,4 @@
-"""PaddleOCR 경로를 별도로 실행할 때 사용하는 worker 진입점."""
+"""PaddleOCR 경로를 별도로 실행할 때 사용하는 worker 진입점입니다."""
 
 import argparse
 import json
@@ -17,7 +17,7 @@ from worker.ocr_paddle import read_volume_paddle
 print("[WORKER] worker_paddle.py entry", flush=True)
 
 def rotate_frame(frame, rotate_code: int):
-    """PaddleOCR이 항상 같은 숫자 배치를 보도록 프레임 방향을 통일한다."""
+    """PaddleOCR이 항상 같은 숫자 배치를 보도록 프레임 방향을 통일하는 함수입니다."""
     if rotate_code == 1:
         return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
     if rotate_code == 2:
@@ -28,7 +28,7 @@ def rotate_frame(frame, rotate_code: int):
 
 
 def main():
-    """Paddle 기반 작업 하나를 수행하고 호출부가 읽을 최종 JSON만 출력한다."""
+    """Paddle 기반 작업 하나를 수행하고 호출부가 읽을 최종 JSON만 출력하는 함수입니다."""
     ap = argparse.ArgumentParser()
 
     ap.add_argument("--camera", type=int, default=0)
@@ -52,7 +52,7 @@ def main():
             pass
 
     def capture_rotated():
-        """캡처 후 바로 회전을 적용해 저장/추론 단계가 같은 기준 프레임을 쓰게 한다."""
+        """캡처 후 바로 회전을 적용해 저장/추론 단계가 같은 기준 프레임을 쓰게 하는 내부 함수입니다."""
         frame = capture_one_frame(args.camera)
         return rotate_frame(frame, args.rotate)
 
@@ -77,7 +77,7 @@ def main():
         cv2.imwrite(FRAME_JPG_PATH, frame)
 
         if args.ocr_auto_rois and not os.path.exists(ROIS_JSON_PATH):
-            # Paddle 경로도 ROI 재사용을 전제로 하므로, 최초 실행 시에만 YOLO를 보조적으로 사용한다.
+            # Paddle 경로도 ROI 재사용을 전제로 하므로, 최초 실행 시에만 YOLO를 보조적으로 사용하는 처리입니다.
             run_yolo_on_frame(frame)
 
         volume = read_volume_paddle(frame, debug_save=args.debug_save)

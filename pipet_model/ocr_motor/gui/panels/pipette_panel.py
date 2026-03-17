@@ -1,4 +1,4 @@
-"""자동 제어와 별개로 현장에서 수동 조작이 필요할 때 쓰는 액추에이터 제어 패널."""
+"""자동 제어와 별개로 현장에서 수동 조작이 필요할 때 쓰는 액추에이터 제어 패널입니다."""
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -18,7 +18,7 @@ class PipettePanel(QWidget):
     """
 
     def __init__(self, controller: Controller, parent=None):
-        """수동 조작도 동일 시리얼 세션을 쓰도록 컨트롤러의 연결을 그대로 재사용한다."""
+        """수동 조작도 동일 시리얼 세션을 쓰도록 컨트롤러의 연결을 그대로 재사용하는 초기화 메서드입니다."""
         super().__init__(parent)
 
         self.controller = controller
@@ -43,7 +43,7 @@ class PipettePanel(QWidget):
     # UI
     # ==========================================================
     def _build_ui(self):
-        """현장 조작에 필요한 리니어/회전 모터 제어 UI를 한 곳에 모아 구성한다."""
+        """현장 조작에 필요한 리니어/회전 모터 제어 UI를 한 곳에 모아 구성하는 메서드입니다."""
         main = QVBoxLayout(self)
         main.addWidget(QLabel("<b>Pipette / End-Effector Control</b>"))
 
@@ -143,28 +143,28 @@ class PipettePanel(QWidget):
     # Toggle handlers (C# Button Click 로직 대응)
     # ==========================================================
     def _toggle_pipetting(self):
-        """흡인분주 축의 현재 상태를 기준으로 상/하 동작을 번갈아 수행한다."""
+        """흡인분주 축의 현재 상태를 기준으로 상/하 동작을 번갈아 수행하는 자리입니다."""
         self._show_linear_toggle_unavailable()
 
     def _toggle_tip_change(self):
-        """팁 교체 축의 현재 상태를 기준으로 상/하 동작을 번갈아 수행한다."""
+        """팁 교체 축의 현재 상태를 기준으로 상/하 동작을 번갈아 수행하는 자리입니다."""
         self._show_linear_toggle_unavailable()
 
     def _toggle_volume_linear(self):
-        """용량 조절 축의 현재 상태를 기준으로 상/하 동작을 번갈아 수행한다."""
+        """용량 조절 축의 현재 상태를 기준으로 상/하 동작을 번갈아 수행하는 자리입니다."""
         self._show_linear_toggle_unavailable()
 
     # ==========================================================
     # Helpers
     # ==========================================================
     def _btn(self, text, cb):
-        """반복되는 버튼 생성 코드를 줄이기 위한 내부 헬퍼다."""
+        """반복되는 버튼 생성 코드를 줄이기 위한 내부 헬퍼입니다."""
         b = QPushButton(text)
         b.clicked.connect(cb)
         return b
 
     def _linear_move(self, actuator_id: int, edit: QLineEdit):
-        """운영자가 직접 입력한 목표 위치로 해당 리니어 액추에이터를 이동시킨다."""
+        """운영자가 직접 입력한 목표 위치로 해당 리니어 액추에이터를 이동시키는 메서드입니다."""
         try:
             pos = int(edit.text())
             self.controller.linear_move(actuator_id, pos)
@@ -172,7 +172,7 @@ class PipettePanel(QWidget):
             QMessageBox.critical(self, "Error", str(e))
 
     def _rotary_start(self, direction: int):
-        """입력창의 duty 값을 기준으로 회전형 용량 모터를 수동 시작한다."""
+        """입력창의 duty 값을 기준으로 회전형 용량 모터를 수동 시작하는 메서드입니다."""
         try:
             duty = int(self.tb_duty.text())
             self.volume_dc.run(direction=direction, duty=duty)
@@ -180,7 +180,7 @@ class PipettePanel(QWidget):
             QMessageBox.critical(self, "Error", str(e))
 
     def _show_linear_toggle_unavailable(self):
-        """미완성인 상/하 토글 기능은 예외 대신 안내 메시지로 막는다."""
+        """미완성인 상/하 토글 기능은 예외 대신 안내 메시지로 막는 메서드입니다."""
         QMessageBox.information(
             self,
             "안내",
@@ -188,5 +188,5 @@ class PipettePanel(QWidget):
         )
 
     def _on_run_state_updated(self, state: dict):
-        """자동 보정 실행 중에는 수동 조작 패널을 잠시 비활성화한다."""
+        """자동 보정 실행 중에는 수동 조작 패널을 잠시 비활성화하는 메서드입니다."""
         self.setEnabled(not bool(state.get("running", False)))
