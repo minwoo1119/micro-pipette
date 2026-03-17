@@ -1,4 +1,4 @@
-"""저장된 ROI 4개를 TensorRT 모델로 읽어 최종 용량값을 만드는 OCR 모듈."""
+"""저장된 ROI 4개를 TensorRT 모델로 읽어 최종 용량값을 만드는 OCR 모듈입니다."""
 
 import json
 import os
@@ -26,7 +26,7 @@ VOLUME_WEIGHTS = [1000, 100, 10, 1]
 # TensorRT Wrapper
 # =========================================================
 class TRTWrapper:
-    """TensorRT 엔진 로딩과 배치 추론 1회를 담당하는 얇은 래퍼."""
+    """TensorRT 엔진 로딩과 배치 추론 1회를 담당하는 얇은 래퍼입니다."""
 
     def __init__(self, engine_path: str):
         if not os.path.exists(engine_path):
@@ -57,7 +57,7 @@ class TRTWrapper:
             self.output_name = self.engine.get_tensor_name(1)
 
     def infer(self, x_nchw: np.ndarray):
-        """전처리된 배치를 한 번 추론하고 자리별 클래스/신뢰도를 반환한다."""
+        """전처리된 배치를 한 번 추론하고 자리별 클래스/신뢰도를 반환하는 메서드입니다."""
         if x_nchw.dtype != np.float32:
             x_nchw = x_nchw.astype(np.float32)
 
@@ -104,7 +104,7 @@ _preprocess = transforms.Compose([
 ])
 
 def preprocess_roi_bgr_trt(roi_bgr: np.ndarray) -> np.ndarray:
-    """학습 시 사용한 전처리와 맞추기 위해 ROI를 TRT 입력 텐서 형태로 변환한다."""
+    """학습 시 사용한 전처리와 맞추기 위해 ROI를 TRT 입력 텐서 형태로 변환하는 함수입니다."""
     rgb = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2RGB)
     pil = Image.fromarray(rgb)
 
@@ -117,7 +117,7 @@ def preprocess_roi_bgr_trt(roi_bgr: np.ndarray) -> np.ndarray:
 # ROI loading
 # =========================================================
 def load_rois():
-    """YOLO가 state 디렉터리에 남긴 최신 ROI 파일을 읽어온다."""
+    """YOLO가 state 디렉터리에 남긴 최신 ROI 파일을 읽어오는 함수입니다."""
     if not os.path.exists(ROIS_JSON_PATH):
         raise FileNotFoundError(f"ROIs not found: {ROIS_JSON_PATH}")
 
@@ -134,10 +134,10 @@ def load_rois():
 # Main OCR logic (TRT)
 # =========================================================
 def read_volume_trt(frame: np.ndarray, trt_model: TRTWrapper) -> int:
-    """프레임에서 ROI 4개를 잘라 자리별 숫자를 읽고 최종 용량값으로 조합한다."""
+    """프레임에서 ROI 4개를 잘라 자리별 숫자를 읽고 최종 용량값으로 조합하는 함수입니다."""
     rois = load_rois()
 
-    # 현재 장비 기준으로 ROI는 위에서 아래 순서가 천/백/십/일 자리다.
+    # 현재 장비 기준으로 ROI는 위에서 아래 순서가 천/백/십/일 자리라는 가정입니다.
     rois = sorted(rois, key=lambda r: r[1])
 
     h, w = frame.shape[:2]
@@ -153,7 +153,7 @@ def read_volume_trt(frame: np.ndarray, trt_model: TRTWrapper) -> int:
         if crop.size == 0:
             raise RuntimeError(f"Empty ROI{i}")
 
-        # 자리별 crop을 남겨두면 현장 디버깅 시 어느 자리에서 오인식이 났는지 바로 확인할 수 있다.
+        # 자리별 crop을 남겨두면 현장 디버깅 시 어느 자리에서 오인식이 났는지 바로 확인할 수 있다는 목적입니다.
         cv2.imwrite(f"/tmp/ocr_roi_{i}.jpg", crop)
         crops.append(crop)
 

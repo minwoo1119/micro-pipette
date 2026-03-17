@@ -1,4 +1,4 @@
-"""실제 운영 화면에서 쓰는 각 제어/상태 패널을 묶는 최상위 창."""
+"""실제 운영 화면에서 쓰는 각 제어/상태 패널을 묶는 최상위 창입니다."""
 
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 
@@ -12,7 +12,7 @@ from gui.panels.run_status_panel import RunStatusPanel
 
 class MainWindow(QWidget):
     def __init__(self):
-        """공용 컨트롤러 1개를 기준으로 모든 패널을 묶어 화면을 구성한다."""
+        """공용 컨트롤러 1개를 기준으로 모든 패널을 묶어 화면을 구성하는 초기화 메서드입니다."""
         super().__init__()
 
         self.setWindowTitle(
@@ -20,7 +20,7 @@ class MainWindow(QWidget):
         )
         self.resize(1100, 1050)
 
-        # 시리얼 세션을 중앙에서만 관리해야 충돌이 없으므로 컨트롤러를 하나만 생성한다.
+        # 시리얼 세션을 중앙에서만 관리해야 충돌이 없으므로 컨트롤러를 하나만 생성하는 구조입니다.
         self.controller = Controller(conda_env="pipet_env")
 
         # ---------- Panels ----------
@@ -50,7 +50,7 @@ class MainWindow(QWidget):
         self.setLayout(main_layout)
 
     def closeEvent(self, event):
-        """창 종료 시점에 컨트롤러 정리를 먼저 수행해 포트나 모터가 남지 않게 한다."""
+        """창 종료 시점에 컨트롤러 정리를 먼저 수행해 포트나 모터가 남지 않게 하는 메서드입니다."""
         try:
             self.controller.close()
         except Exception:

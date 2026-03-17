@@ -1,4 +1,4 @@
-"""OCR에서 재사용할 숫자 ROI를 검출하고 저장하는 YOLO 모듈."""
+"""OCR에서 재사용할 숫자 ROI를 검출하고 저장하는 YOLO 모듈입니다."""
 
 import json
 import cv2
@@ -13,7 +13,7 @@ from worker.paths import (
 
 
 def _sorted_rois_from_results(results, frame_shape):
-    """YOLO 결과를 상단 기준 정렬된 ROI 리스트로 바꿔 후속 OCR이 그대로 쓰게 한다."""
+    """YOLO 결과를 상단 기준 정렬된 ROI 리스트로 바꿔 후속 OCR이 그대로 쓰게 하는 함수입니다."""
     boxes = results.boxes
     if boxes is None or len(boxes) == 0:
         return []
@@ -33,7 +33,7 @@ def _sorted_rois_from_results(results, frame_shape):
 
 
 def run_yolo_on_frame(frame, conf: float = 0.2, iou: float = 0.5):
-    """프레임 한 장에서 ROI를 찾고, 후속 모듈이 쓸 좌표/미리보기 파일을 함께 저장한다."""
+    """프레임 한 장에서 ROI를 찾고, 후속 모듈이 쓸 좌표/미리보기 파일을 함께 저장하는 함수입니다."""
     ensure_state_dir()
 
     model = YOLO(YOLO_MODEL_PATH)
@@ -59,5 +59,5 @@ def run_yolo_on_frame(frame, conf: float = 0.2, iou: float = 0.5):
     with open(ROIS_JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(rois, f, ensure_ascii=False, indent=2)
 
-    # 현 구조에서는 OpenCV 창을 띄우지 않고 GUI가 저장된 결과 이미지를 다시 읽어 보여준다.
+    # 현 구조에서는 OpenCV 창을 띄우지 않고 GUI가 저장된 결과 이미지를 다시 읽어 보여주는 구조입니다.
     return rois, YOLO_JPG_PATH

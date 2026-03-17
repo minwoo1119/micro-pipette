@@ -1,4 +1,4 @@
-"""TensorRT 엔진의 텐서 메타데이터를 빠르게 확인하는 스크립트."""
+"""TensorRT 엔진의 텐서 메타데이터를 빠르게 확인하는 스크립트입니다."""
 
 import tensorrt as trt
 import os

@@ -1,4 +1,4 @@
-"""단일 목표값 기준으로 PaddleOCR 경로를 검증할 때 사용하는 테스트 스크립트."""
+"""단일 목표값 기준으로 PaddleOCR 경로를 검증할 때 사용하는 테스트 스크립트입니다."""
 
 import argparse
 import subprocess
@@ -39,12 +39,12 @@ _volume_dc = None
 
 
 def ensure_dirs():
-    """테스트 중 남길 산출물 디렉터리를 미리 준비한다."""
+    """테스트 중 남길 산출물 디렉터리를 미리 준비하는 함수입니다."""
     os.makedirs(SNAP_DIR, exist_ok=True)
 
 
 def ensure_volume_dc():
-    """반복 테스트 동안 같은 DC 모터 컨트롤러를 재사용하도록 지연 생성한다."""
+    """반복 테스트 동안 같은 DC 모터 컨트롤러를 재사용하도록 지연 생성하는 함수입니다."""
     global _serial, _volume_dc
     if _serial is None:
         _serial = SerialController()
@@ -58,7 +58,7 @@ def ensure_volume_dc():
 
 
 def cleanup_volume_dc():
-    """테스트 종료 시 열려 있는 시리얼 연결이 남지 않도록 정리한다."""
+    """테스트 종료 시 열려 있는 시리얼 연결이 남지 않도록 정리하는 함수입니다."""
     global _serial, _volume_dc
 
     try:
@@ -78,7 +78,7 @@ def cleanup_volume_dc():
 
 
 def _run_worker_and_parse_ok(cmd, timeout_sec: int) -> int:
-    """worker stdout에서 성공 JSON만 골라 실제 용량값만 반환하는 공용 파서다."""
+    """worker stdout에서 성공 JSON만 골라 실제 용량값만 반환하는 공용 파서입니다."""
     p = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -112,7 +112,7 @@ def _run_worker_and_parse_ok(cmd, timeout_sec: int) -> int:
 
 
 def read_ocr_volume_legacy(camera_index=0, rotate=1) -> int:
-    """기존 TensorRT OCR worker를 1회 호출한다."""
+    """기존 TensorRT OCR worker를 1회 호출하는 함수입니다."""
     cmd = [
         sys.executable, "-m", "worker.worker",
         "--ocr",
@@ -123,7 +123,7 @@ def read_ocr_volume_legacy(camera_index=0, rotate=1) -> int:
 
 
 def read_ocr_volume_paddle_only(camera_index=0, rotate=1, auto_rois=True, debug_save=False) -> int:
-    """PaddleOCR worker를 1회 호출한다."""
+    """PaddleOCR worker를 1회 호출하는 함수입니다."""
     cmd = [
         sys.executable, "-m", "worker.worker_paddle",
         "--ocr",
@@ -141,10 +141,10 @@ def read_ocr_volume_paddle_only(camera_index=0, rotate=1, auto_rois=True, debug_
 def read_ocr_volume(camera_index=0, rotate=1, auto_rois=True, debug_save=False,
                     paddle_retries: int = PADDLE_RETRIES,
                     retry_delay: float = PADDLE_RETRY_DELAY) -> int:
-    """현 테스트의 기본 경로인 PaddleOCR을 우선 쓰고 실패 시 legacy OCR로 넘긴다."""
+    """현 테스트의 기본 경로인 PaddleOCR을 우선 쓰고 실패 시 legacy OCR로 넘기는 함수입니다."""
     last_paddle_err = None
 
-    # 이 스크립트는 Paddle 경로 검증이 목적이므로 Paddle 쪽 재시도를 먼저 충분히 준다.
+    # 이 스크립트는 Paddle 경로 검증이 목적이므로 Paddle 쪽 재시도를 먼저 충분히 주는 구조입니다.
     for attempt in range(1, paddle_retries + 1):
         try:
             return read_ocr_volume_paddle_only(
@@ -158,7 +158,7 @@ def read_ocr_volume(camera_index=0, rotate=1, auto_rois=True, debug_save=False,
             if attempt < paddle_retries:
                 time.sleep(retry_delay)
 
-    # 그래도 실패할 때만 legacy 경로를 써서 장비 제어 테스트가 완전히 막히지 않게 한다.
+    # 그래도 실패할 때만 legacy 경로를 써서 장비 제어 테스트가 완전히 막히지 않게 하는 구조입니다.
     try:
         return read_ocr_volume_legacy(camera_index=camera_index, rotate=rotate)
     except Exception as e2:
@@ -170,7 +170,7 @@ def read_ocr_volume(camera_index=0, rotate=1, auto_rois=True, debug_save=False,
 
 
 def move_motor(direction: int, duty: int, duration_ms: int):
-    """테스트 스크립트에서 가장 단순하게 쓰는 '일정 시간 구동 후 정지' 헬퍼다."""
+    """테스트 스크립트에서 가장 단순하게 쓰는 '일정 시간 구동 후 정지' 헬퍼입니다."""
     dc = ensure_volume_dc()
     dc.run(direction=direction, duty=duty)
     time.sleep(duration_ms / 1000.0)
@@ -178,7 +178,7 @@ def move_motor(direction: int, duty: int, duration_ms: int):
 
 
 def save_calibration(calib: dict):
-    """보정값을 JSON 파일로 남겨 다음 테스트에서도 그대로 재사용할 수 있게 한다."""
+    """보정값을 JSON 파일로 남겨 다음 테스트에서도 그대로 재사용할 수 있게 하는 함수입니다."""
     to_save = {str(k): v for k, v in calib.items()}
     with open(CALIB_JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(to_save, f, indent=2, ensure_ascii=False)
@@ -186,7 +186,7 @@ def save_calibration(calib: dict):
 
 
 def load_calibration():
-    """기존 보정 파일이 있으면 읽고, 없으면 새 보정을 하도록 None을 반환한다."""
+    """기존 보정 파일이 있으면 읽고, 없으면 새 보정을 하도록 None을 반환하는 함수입니다."""
     if not os.path.exists(CALIB_JSON_PATH):
         return None
 
@@ -205,7 +205,7 @@ def calibrate_one_target(
     camera_index: int,
     rotate: int,
 ):
-    """특정 step 크기에 맞는 duty/duration 조합을 찾기 위한 보정 루틴이다."""
+    """특정 step 크기에 맞는 duty/duration 조합을 찾기 위한 보정 루틴입니다."""
     print(f"[CALIB] target={target_ul}uL")
 
     duty = base_duty
@@ -243,7 +243,7 @@ def calibrate_one_target(
 
 
 def run_calibration(camera_index=0, rotate=1):
-    """대표 step 크기별 보정값 세트를 한 번에 만든다."""
+    """대표 step 크기별 보정값 세트를 한 번에 만드는 함수입니다."""
     print("=" * 40)
     print("[CALIB] start calibration (one-time) [PaddleOCR→Legacy fallback]")
     print("=" * 40)
@@ -269,7 +269,7 @@ def single_target_test_paddle(
     camera_index: int = 0,
     rotate: int = 1,
 ):
-    """보정 테이블을 사용해 목표값까지 접근하는 단순 피드백 루프를 실행한다."""
+    """보정 테이블을 사용해 목표값까지 접근하는 단순 피드백 루프를 실행하는 함수입니다."""
     print(f"[TEST] target={target_ul}")
 
     cur = None
@@ -287,7 +287,7 @@ def single_target_test_paddle(
                 "steps": step + 1,
             }
 
-        # 장비 안전 범위를 벗어날 가능성이 보이면 더 진행하지 않고 중단한다.
+        # 장비 안전 범위를 벗어날 가능성이 보이면 더 진행하지 않고 중단하는 기준입니다.
         if cur <= VALID_MIN_UL + BOUND_MARGIN and err < 0:
             print("[BOUND] lower limit reached")
             break
@@ -333,7 +333,7 @@ if __name__ == "__main__":
             calib = run_calibration(args.camera, args.rotate)
 
         if args.target is None:
-            # 목표값이 없으면 기존 테스트 스크립트처럼 임의 목표값 1건을 사용한다.
+            # 목표값이 없으면 기존 테스트 스크립트처럼 임의 목표값 1건을 사용하는 처리입니다.
             import random
             tgt = random.randrange(1000, 4501, 5)
         else:

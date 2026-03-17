@@ -1,4 +1,4 @@
-"""GUI, worker, test 모듈이 함께 쓰는 파일 경로 상수 모음."""
+"""GUI, worker, test 모듈이 함께 쓰는 파일 경로 상수 모음입니다."""
 
 import os
 
@@ -16,5 +16,5 @@ FRAME_JPG_PATH  = os.path.join(STATE_DIR, "last_frame.jpg")
 YOLO_JPG_PATH   = os.path.join(STATE_DIR, "last_yolo.jpg")
 
 def ensure_state_dir():
-    """캡처 프레임과 ROI JSON을 저장하는 공용 state 디렉터리를 만든다."""
+    """캡처 프레임과 ROI JSON을 저장하는 공용 state 디렉터리를 만드는 함수입니다."""
     os.makedirs(STATE_DIR, exist_ok=True)
