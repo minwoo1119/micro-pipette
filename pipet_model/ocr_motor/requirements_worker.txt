@@ -1,0 +1,6 @@
+torch
+ultralytics
+opencv-python
+pyserial
+tensorrt
+pycuda

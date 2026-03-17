@@ -1,0 +1,22 @@
+{
+  "100": {
+    "duty": 55,
+    "duration_ms": 780,
+    "delta_ul": 100
+  },
+  "50": {
+    "duty": 40,
+    "duration_ms": 500,
+    "delta_ul": 45
+  },
+  "10": {
+    "duty": 30,
+    "duration_ms": 150,
+    "delta_ul": 5
+  },
+  "5": {
+    "duty": 25,
+    "duration_ms": 80,
+    "delta_ul": 5
+  }
+}

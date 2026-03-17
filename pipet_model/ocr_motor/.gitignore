@@ -1,0 +1,6 @@
+/snapshots
+/snapshots_backup
+/snapshots_paddle
+/data
+/dum
+*.pyc
