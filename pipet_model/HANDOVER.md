@@ -1,0 +1,975 @@
+# `pipet_model` 인수인계 문서
+
+## 0. 문서 목적
+이 문서는 `/pipet_model` 아래 프로젝트를 다음 담당자가 빠르게 이해하고 실행할 수 있도록 정리한 인수인계 문서다.  
+정리 범위는 다음과 같다.
+
+1. 리팩토링 자료
+2. 실행 및 운용 방법
+3. 인수인계 시 주의사항
+
+현재 문서는 **현재 저장소에 남아 있는 코드 기준**으로 작성했다.
+
+---
+
+## 1. 프로젝트 개요
+
+### 1.1 목적
+이 프로젝트는 마이크로피펫 장비를 대상으로 다음 기능을 통합한다.
+
+- 카메라 프레임 캡처
+- YOLO 기반 숫자 영역(ROI) 검출
+- OCR 기반 현재 용량 판독
+- 목표 용량까지 자동 보정(run-to-target)
+- 시리얼 기반 액추에이터/모터 제어
+- PyQt5 기반 운영 GUI
+
+### 1.2 전체 실행 구조
+이 프로젝트는 **GUI와 추론/비전 worker를 분리**해서 사용한다.
+
+- GUI는 **시스템 Python** 으로 실행한다.
+- OCR/YOLO/일부 worker 기능은 **conda 환경**에서 실행한다.
+- GUI는 직접 시리얼 포트를 잡고 있다.
+- GUI는 필요할 때 `conda run -n pipet_env python -m worker.worker ...` 형태로 worker를 호출한다.
+
+즉, 구조는 다음과 같다.
+
+1. 운영자는 시스템 Python으로 GUI를 실행한다.
+2. GUI는 시리얼 연결을 직접 생성한다.
+3. 캡처/YOLO/OCR/run-to-target 판단은 worker 프로세스로 호출한다.
+4. worker는 JSON 결과를 stdout으로 반환한다.
+5. GUI는 그 JSON을 해석하고 실제 모터 구동을 수행한다.
+
+### 1.3 왜 이렇게 분리했는가
+현재 코드와 README 기준으로 추정되는 설계 이유는 다음과 같다.
+
+- PyQt5는 시스템 Python에서 더 안정적으로 동작한다.
+- TensorRT / PyCUDA / Torch / Ultralytics / PaddleOCR 계열은 conda 환경에서 관리하는 편이 충돌이 적다.
+- GUI와 추론 환경을 분리하면 CUDA/Qt 충돌 위험을 줄일 수 있다.
+
+---
+
+## 2. 디렉터리 구조
+
+```text
+pipet_model/
+├── HANDOVER.md
+└── ocr_motor/
+    ├── gui/                  # 시스템 Python에서 실행하는 GUI
+    ├── worker/               # conda 환경에서 실행하는 비전/제어 worker
+    ├── test/                 # 단발 테스트/보정 스크립트
+    ├── models/               # YOLO / OCR 모델 파일
+    ├── state/                # 최신 캡처 프레임, ROI, YOLO 결과 이미지
+    ├── README.md             # 기존 실행 안내
+    ├── requirements_gui.txt
+    ├── requirements_worker.txt
+    └── calibration_paddle.json
+```
+
+### 2.1 각 폴더 역할
+
+#### `ocr_motor/gui`
+- 메인 운영 화면
+- 캡처, ROI 검출, OCR, run-to-target 실행 버튼 제공
+- 시리얼 연결을 직접 생성하고 유지
+- worker 호출 결과를 화면과 모터 제어에 반영
+
+#### `ocr_motor/worker`
+- 카메라 캡처
+- YOLO ROI 검출
+- TensorRT OCR
+- PaddleOCR 대체 경로
+- run-to-target 제어 판단
+- 시리얼 패킷 생성 및 전송 계층
+
+#### `ocr_motor/test`
+- OCR 경로 점검
+- PaddleOCR 우선 경로 검증
+- 캘리브레이션 보조
+- 로그 기록
+
+#### `ocr_motor/models`
+- YOLO 모델 파일
+- OCR TRT / ONNX / PT 모델 파일
+
+#### `ocr_motor/state`
+- 최근 캡처 프레임
+- 최근 YOLO 시각화 이미지
+- 최근 ROI JSON
+
+---
+
+## 3. 리팩토링 자료
+
+## 3.1 개발한 전체 함수 / 클래스 목록
+
+아래 목록은 현재 코드 기준이다.
+
+### 3.1.1 GUI 계층
+
+#### `ocr_motor/gui/main.py`
+- 진입점
+  - 별도 함수 없음
+
+#### `ocr_motor/gui/main_window.py`
+- 클래스
+  - `MainWindow`
+- 메서드
+  - `MainWindow.__init__`
+  - `MainWindow.closeEvent`
+
+#### `ocr_motor/gui/controller.py`
+- 클래스
+  - `WorkerResult`
+  - `Controller`
+- 메서드
+  - `Controller.__init__`
+  - `Controller.set_video_panel`
+  - `Controller.refresh_camera_view`
+  - `Controller._run_worker`
+  - `Controller.capture_frame`
+  - `Controller.yolo_detect`
+  - `Controller.ocr_read_volume`
+  - `Controller.start_run_to_target`
+  - `Controller._run_to_target_stdout_loop`
+  - `Controller._run_to_target_stderr_loop`
+  - `Controller.stop_run_to_target`
+  - `Controller.close`
+
+#### `ocr_motor/gui/panels/video_panel.py`
+- 클래스
+  - `VideoPanel`
+- 메서드
+  - `VideoPanel.__init__`
+  - `VideoPanel.set_latest_volume`
+  - `VideoPanel.show_image`
+  - `VideoPanel.on_capture`
+
+#### `ocr_motor/gui/panels/yolo_panel.py`
+- 클래스
+  - `YoloPanel`
+- 메서드
+  - `YoloPanel.__init__`
+  - `YoloPanel._run`
+  - `YoloPanel.on_detect`
+  - `YoloPanel.on_reset`
+  - `YoloPanel.normalize_vertical_rois`
+  - `YoloPanel.show_fixed_rois`
+
+#### `ocr_motor/gui/panels/target_panel.py`
+- 클래스
+  - `TargetPanel`
+- 메서드
+  - `TargetPanel.__init__`
+  - `TargetPanel.on_read`
+  - `TargetPanel.on_start`
+  - `TargetPanel.on_stop`
+  - `TargetPanel.update_camera_frame`
+
+#### `ocr_motor/gui/panels/run_status_panel.py`
+- 클래스
+  - `RunStatusPanel`
+- 메서드
+  - `RunStatusPanel.__init__`
+  - `RunStatusPanel.on_state_updated`
+
+#### `ocr_motor/gui/panels/pipette_panel.py`
+- 클래스
+  - `PipettePanel`
+- 메서드
+  - `PipettePanel.__init__`
+  - `PipettePanel._build_ui`
+  - `PipettePanel._toggle_pipetting`
+  - `PipettePanel._toggle_tip_change`
+  - `PipettePanel._toggle_volume_linear`
+  - `PipettePanel._btn`
+  - `PipettePanel._linear_move`
+  - `PipettePanel._rotary_start`
+
+### 3.1.2 Worker 계층
+
+#### `ocr_motor/worker/worker.py`
+- 함수
+  - `rotate_frame`
+  - `main`
+  - `capture_rotated` 내부 함수
+
+#### `ocr_motor/worker/worker_paddle.py`
+- 함수
+  - `rotate_frame`
+  - `main`
+  - `capture_rotated` 내부 함수
+
+#### `ocr_motor/worker/camera.py`
+- 함수
+  - `capture_one_frame`
+
+#### `ocr_motor/worker/capture_frame.py`
+- 함수
+  - `capture_one_frame_to_disk`
+
+#### `ocr_motor/worker/paths.py`
+- 함수
+  - `ensure_state_dir`
+
+#### `ocr_motor/worker/yolo_worker.py`
+- 함수
+  - `_sorted_rois_from_results`
+  - `run_yolo_on_frame`
+
+#### `ocr_motor/worker/ocr_trt.py`
+- 클래스
+  - `TRTWrapper`
+- 메서드
+  - `TRTWrapper.__init__`
+  - `TRTWrapper.infer`
+- 함수
+  - `preprocess_roi_bgr_trt`
+  - `load_rois`
+  - `read_volume_trt`
+
+#### `ocr_motor/worker/ocr_paddle.py`
+- 함수
+  - `load_rois`
+  - `_extract_digits_from_paddle_result`
+  - `_preprocess_variants`
+  - `ocr_one_digit`
+  - `read_volume_paddle`
+  - `walk` 내부 함수
+  - `up2` 내부 함수
+
+#### `ocr_motor/worker/control_worker.py`
+- 함수
+  - `_elog`
+  - `run_to_target`
+
+#### `ocr_motor/worker/make_packet.py`
+- 클래스
+  - `MakePacket`
+- 메서드
+  - `MakePacket._checksum`
+  - `MakePacket._base_packet`
+  - `MakePacket.set_position`
+  - `MakePacket.set_speed`
+  - `MakePacket.set_current`
+  - `MakePacket.set_force_onoff`
+  - `MakePacket.get_moving`
+  - `MakePacket.get_feedback`
+  - `MakePacket.request_check_operate_status`
+  - `MakePacket.myactuator_set_absolute_angle`
+  - `MakePacket.myactuator_get_absolute_angle`
+  - `MakePacket.pipette_change_volume`
+
+#### `ocr_motor/worker/serial_controller.py`
+- 클래스
+  - `SerialController`
+- 메서드
+  - `SerialController.__init__`
+  - `SerialController.connect`
+  - `SerialController.close`
+  - `SerialController.enqueue`
+  - `SerialController._tx_worker`
+  - `SerialController._poll_worker`
+  - `SerialController._rx_worker`
+  - `SerialController._handle_frame`
+  - `SerialController.move_and_wait`
+  - `SerialController.send_mightyzap_set_position`
+  - `SerialController.send_mightyzap_set_speed`
+  - `SerialController.send_mightyzap_set_current`
+  - `SerialController.send_mightyzap_force_onoff`
+  - `SerialController.send_pipette_change_volume`
+  - `SerialController.send_pipette_stop`
+
+#### `ocr_motor/worker/actuator_linear.py`
+- 클래스
+  - `LinearActuator`
+- 메서드
+  - `LinearActuator.__init__`
+  - `LinearActuator.move_to`
+  - `LinearActuator.pipetting_up`
+  - `LinearActuator.pipetting_down`
+  - `LinearActuator.tip_change_up`
+  - `LinearActuator.tip_change_down`
+  - `LinearActuator.volume_up`
+  - `LinearActuator.volume_down`
+
+#### `ocr_motor/worker/actuator_volume_dc.py`
+- 클래스
+  - `VolumeDCActuator`
+- 메서드
+  - `VolumeDCActuator.__init__`
+  - `VolumeDCActuator.run`
+  - `VolumeDCActuator.stop`
+
+#### `ocr_motor/worker/motor_controller.py`
+- 함수
+  - `_connect`
+  - `motor_test`
+  - `run_to_target`
+
+#### `ocr_motor/worker/test_ocr_only.py`
+- 함수
+  - `preprocess_roi`
+  - `load_ocr_model`
+  - `main`
+
+### 3.1.3 테스트 계층
+
+#### `ocr_motor/test/test_utils.py`
+- 함수
+  - `ensure_dirs`
+  - `generate_random_target`
+  - `take_snapshot`
+
+#### `ocr_motor/test/test_logger.py`
+- 함수
+  - `init_log`
+  - `append_log`
+
+#### `ocr_motor/test/test_paddleOCR.py`
+- 함수
+  - `read_ocr_volume_paddle`
+
+#### `ocr_motor/test/single_target_paddleOCR_test.py`
+- 함수
+  - `ensure_dirs`
+  - `ensure_volume_dc`
+  - `_run_worker_and_parse_ok`
+  - `read_ocr_volume_legacy`
+  - `read_ocr_volume_paddle_only`
+  - `read_ocr_volume`
+  - `move_motor`
+  - `save_calibration`
+  - `load_calibration`
+  - `calibrate_one_target`
+  - `run_calibration`
+  - `single_target_test_paddle`
+
+### 3.1.4 기타
+
+#### `ocr_motor/inspect_trt.py`
+- 별도 함수 없이 즉시 실행되는 TensorRT 엔진 점검 스크립트
+
+---
+
+## 3.2 각 코드 및 함수별 상세 설명
+
+### 3.2.1 가장 중요한 실행 흐름
+
+#### 1) GUI 실행
+- 시작 파일: `ocr_motor/gui/main.py`
+- 역할:
+  - PyQt5 앱 생성
+  - `MainWindow` 생성
+  - 메인 이벤트 루프 시작
+
+#### 2) 메인 화면 조립
+- 파일: `ocr_motor/gui/main_window.py`
+- 역할:
+  - `Controller` 1개 생성
+  - `VideoPanel`, `YoloPanel`, `TargetPanel`, `RunStatusPanel`, `PipettePanel` 연결
+  - 종료 시 `controller.close()` 호출
+
+#### 3) 실질적인 조정 계층
+- 파일: `ocr_motor/gui/controller.py`
+- 역할:
+  - 시리얼 포트 생성 및 액추에이터 래퍼 연결
+  - 단발성 worker 호출
+  - 장시간 worker 프로세스(run-to-target) 관리
+  - worker JSON 응답을 받아 GUI 상태/모터 동작에 반영
+
+#### 4) 단발성 worker 진입점
+- 파일: `ocr_motor/worker/worker.py`
+- 역할:
+  - `--capture`
+  - `--yolo`
+  - `--ocr`
+  - `--run-target`
+  - 위 네 가지 요청을 CLI 인자로 분기 처리
+
+#### 5) OCR 경로
+- 기본 경로:
+  - `worker.py`
+  - `ocr_trt.py`
+- 대체 경로:
+  - `worker_paddle.py`
+  - `ocr_paddle.py`
+
+#### 6) 모터/통신 경로
+- 패킷 생성: `worker/make_packet.py`
+- 시리얼 전송: `worker/serial_controller.py`
+- 리니어 액추에이터 추상화: `worker/actuator_linear.py`
+- 회전형 용량 모터 추상화: `worker/actuator_volume_dc.py`
+
+### 3.2.2 파일별 설명
+
+#### `ocr_motor/gui/controller.py`
+핵심 컨트롤러다. 인수인계 시 가장 먼저 읽어야 하는 파일이다.
+
+- `WorkerResult`
+  - worker 표준 응답 래퍼
+  - `ok`, `data`, `raw`로 정리
+
+- `Controller.__init__`
+  - conda env 이름 저장
+  - root directory 계산
+  - `/dev/ttyUSB0`에 시리얼 연결
+  - `LinearActuator`, `VolumeDCActuator` 생성
+  - 액추에이터 force/speed/current/position 초기화 수행
+  - run 상태 딕셔너리 초기화
+
+- `Controller._run_worker`
+  - `conda run -n <env> python -u -m worker.worker ...` 형태로 worker 실행
+  - stdout 마지막 줄 JSON을 파싱해 `WorkerResult`로 반환
+  - 단발 호출 공통 함수
+
+- `Controller.capture_frame`
+  - 단순 캡처 요청
+  - 성공 시 preview 새로고침
+
+- `Controller.yolo_detect`
+  - ROI 검출 요청
+  - `reset=True`면 `--reset-rois` 추가
+
+- `Controller.ocr_read_volume`
+  - OCR 1회 판독 요청
+
+- `Controller.start_run_to_target`
+  - 장시간 worker 프로세스 실행
+  - 이때는 `subprocess.Popen` 사용
+  - stdout/stderr를 별도 스레드로 읽는다
+
+- `Controller._run_to_target_stdout_loop`
+  - worker의 제어 판단 JSON을 읽는다
+  - `volume` 메시지를 받으면 실제 `volume_dc.run()` / `stop()` 수행
+  - 즉, 실제 시리얼 구동은 GUI 쪽에서 한다
+
+- `Controller._run_to_target_stderr_loop`
+  - 사람이 보는 디버그 로그를 터미널에 전달
+
+- `Controller.stop_run_to_target`
+  - worker 종료
+  - DC 모터 정지
+  - run 상태 갱신
+
+- `Controller.close`
+  - 종료 시 모터 정지 후 시리얼 포트 닫기
+
+#### `ocr_motor/worker/worker.py`
+GUI에서 가장 많이 호출하는 공용 worker 진입점이다.
+
+- `rotate_frame`
+  - 카메라 방향 차이를 보정
+
+- `main`
+  - CLI 인자 파싱
+  - state 디렉터리 생성
+  - ROI reset 처리
+  - capture / yolo / ocr / run-target 분기 수행
+
+- 내부 함수 `capture_rotated`
+  - 카메라 캡처 후 회전 적용
+
+#### `ocr_motor/worker/yolo_worker.py`
+YOLO 검출 결과를 후속 OCR이 쓰는 형태로 저장한다.
+
+- `_sorted_rois_from_results`
+  - YOLO 검출 박스를 위쪽 기준 정렬
+  - `[x, y, w, h]` 형태로 변환
+  - 프레임 범위 밖으로 나가지 않게 clamp 처리
+
+- `run_yolo_on_frame`
+  - `best_rotate_yolo.pt` 로드
+  - ROI 검출
+  - 시각화 이미지 저장
+  - `state/rois.json` 저장
+
+#### `ocr_motor/worker/ocr_trt.py`
+기본 OCR 경로다.
+
+- `TRTWrapper`
+  - TensorRT 엔진 로딩
+  - 입력/출력 텐서 이름 확인
+  - 추론 수행
+
+- `preprocess_roi_bgr_trt`
+  - OpenCV BGR ROI를 모델 입력에 맞는 텐서로 변환
+
+- `load_rois`
+  - `state/rois.json` 로드
+
+- `read_volume_trt`
+  - ROI 4개 crop
+  - 배치 추론
+  - 자리값(천/백/십/일) 합산
+
+#### `ocr_motor/worker/ocr_paddle.py`
+대체 OCR 경로다.
+
+- `load_rois`
+  - 최근 ROI 로드
+
+- `_extract_digits_from_paddle_result`
+  - PaddleOCR 결과 구조가 일정하지 않을 수 있어 숫자만 방어적으로 추출
+
+- `_preprocess_variants`
+  - raw / otsu / inverse / upsample 변형 생성
+
+- `ocr_one_digit`
+  - 한 자리 ROI에서 여러 전처리를 순서대로 시도
+
+- `read_volume_paddle`
+  - ROI 4개를 읽어 최종 용량으로 합침
+
+#### `ocr_motor/worker/control_worker.py`
+비전 기반 run-to-target 제어 판단부다.
+
+- `_elog`
+  - 사람 로그를 stderr로 분리 출력
+
+- `run_to_target`
+  - 카메라 캡처
+  - OCR 판독
+  - 목표와 오차 계산
+  - 방향/세기/시간 결정
+  - GUI가 이해할 수 있는 JSON 명령 출력
+
+중요:
+- 이 파일은 **모터를 직접 돌리지 않는다**
+- 실제 구동은 `Controller._run_to_target_stdout_loop` 에서 수행한다
+
+#### `ocr_motor/worker/serial_controller.py`
+실제 시리얼 통신의 핵심이다.
+
+- `connect`
+  - 포트 오픈
+  - TX / RX / Poll 스레드 시작
+
+- `enqueue`
+  - 전송 패킷 큐 삽입
+
+- `_tx_worker`
+  - 큐의 패킷을 실제 전송
+
+- `_poll_worker`
+  - 유휴 시 상태 poll 패킷 주기적 전송
+
+- `_rx_worker`
+  - 수신 바이트를 프레임으로 분리
+
+- `_handle_frame`
+  - 상태 프레임만 해석해 내부 캐시에 저장
+
+- `send_*`
+  - 상위 계층이 패킷 포맷을 몰라도 명령을 보낼 수 있도록 래핑
+
+#### `ocr_motor/worker/make_packet.py`
+패킷 포맷 정의와 생성 전담 파일이다.
+
+- `_checksum`
+  - 체크섬 계산
+
+- `_base_packet`
+  - 13바이트 공통 패킷 조립
+
+- 나머지 메서드
+  - 위치/속도/전류/force/poll/각도/용량 변경용 패킷 생성
+
+#### `ocr_motor/worker/actuator_linear.py`
+리니어 액추에이터 추상화 계층이다.
+
+- `move_to`
+  - 위치 이동 후 짧게 대기
+
+- `pipetting_up/down`
+- `tip_change_up/down`
+- `volume_up/down`
+  - 의미 단위 이름만 부여한 래퍼 메서드
+
+#### `ocr_motor/worker/actuator_volume_dc.py`
+용량 조절 회전 모터 추상화 계층이다.
+
+- `run`
+  - 방향, duty 보정 후 구동 명령
+
+- `stop`
+  - 정지 명령
+
+#### `ocr_motor/gui/panels/*`
+운영자가 직접 누르는 UI 조작 패널이다.
+
+- `video_panel.py`
+  - 단일 프레임 캡처 및 preview
+
+- `yolo_panel.py`
+  - ROI 검출 및 ROI 좌표 확인
+
+- `target_panel.py`
+  - OCR 판독 / run-to-target 시작 / 정지
+
+- `run_status_panel.py`
+  - 단계별 상태 로그 표시
+
+- `pipette_panel.py`
+  - 수동 리니어/회전 모터 조작용
+
+#### `ocr_motor/test/*`
+실운영 코드보다는 점검/보조 목적이다.
+
+- `test_paddleOCR.py`
+  - Paddle worker 단독 호출 점검
+
+- `single_target_paddleOCR_test.py`
+  - PaddleOCR 우선 경로 + 간단한 캘리브레이션 테스트
+
+- `test_logger.py`
+  - CSV 기록
+
+- `test_utils.py`
+  - snapshot, 랜덤 목표값 등 보조 기능
+
+### 3.2.3 주석 보강 상태
+현재 Python 파일들에는 인수인계형 주석을 추가해 두었다.
+
+- 모듈 상단: 파일 역할 설명
+- 핵심 함수/메서드: 누가 호출하는지, 어떤 역할인지 설명
+- 흐름 분기: 왜 이렇게 연결되어 있는지 설명
+- 유지보수 포인트: GUI/worker/시리얼 책임 분리 설명
+
+즉, 코드 이해는 다음 순서로 하면 된다.
+
+1. `gui/controller.py`
+2. `worker/worker.py`
+3. `worker/control_worker.py`
+4. `worker/ocr_trt.py`
+5. `worker/yolo_worker.py`
+6. `worker/serial_controller.py`
+
+---
+
+## 4. 실행 및 운용 방법
+
+## 4.1 필요한 개발 환경
+
+### 4.1.1 운영체제
+- 기존 README 기준으로 Ubuntu 22.04 / 24.04 가정
+- 실제 포트 경로는 `/dev/ttyUSB0` 기준으로 작성되어 있음
+
+### 4.1.2 Python 구성
+반드시 두 환경을 분리해서 생각해야 한다.
+
+#### A. 시스템 Python
+용도:
+- GUI 실행
+- PyQt5 구동
+
+필수:
+- `python3`
+- `PyQt5`
+
+예시:
+
+```bash
+sudo apt update
+sudo apt install -y python3-pyqt5
+```
+
+주의:
+- 현재 문서와 기존 README 기준으로 **GUI는 conda Python이 아니라 시스템 Python으로 실행하는 전제**가 강하다.
+- PyQt5를 conda에서 실행할 경우 환경 충돌 가능성이 있다.
+
+#### B. conda 환경
+용도:
+- OCR
+- YOLO
+- TensorRT
+- pycuda
+- worker 실행
+
+예시:
+
+```bash
+conda create -n pipet_env python=3.10 -y
+conda activate pipet_env
+pip install -r pipet_model/ocr_motor/requirements_worker.txt
+```
+
+`requirements_worker.txt` 기준 패키지:
+
+- `torch`
+- `ultralytics`
+- `opencv-python`
+- `pyserial`
+- `tensorrt`
+- `pycuda`
+
+실제 코드상 추가로 필요할 수 있는 항목:
+- `torchvision`
+- `pillow`
+- `paddleocr`
+- `numpy`
+- `timm` (`worker/test_ocr_only.py` 사용 시)
+
+즉, worker 전체 기능을 다 쓰려면 아래 수준으로 맞추는 것이 안전하다.
+
+```bash
+pip install torch torchvision ultralytics opencv-python pyserial tensorrt pycuda pillow numpy paddleocr timm
+```
+
+### 4.1.3 모델 파일
+현재 코드 기준으로 실제 참조 경로는 다음과 같다.
+
+#### YOLO
+- `pipet_model/ocr_motor/models/yolo/best_rotate_yolo.pt`
+
+#### 기본 OCR TRT
+- `pipet_model/ocr_motor/models/ocr/finetuned_efficientnet_b0_trtmatch_fp16_dynamic.trt`
+
+이 파일들이 없거나 경로가 바뀌면 GUI는 떠도 OCR/YOLO worker는 실패한다.
+
+### 4.1.4 장비/포트
+- 시리얼 포트: `/dev/ttyUSB0`
+- baudrate: `115200`
+- 카메라 인덱스 기본값: `0`
+- 캡처 해상도: `1280 x 800`
+
+포트/카메라 번호가 다르면 코드 수정 또는 실행 파라미터 조정이 필요하다.
+
+---
+
+## 4.2 실제 실행 절차
+
+### 4.2.1 GUI 실행
+
+저장소 루트에서:
+
+```bash
+cd /Users/minwoo/Documents/GitHub/micro-pipet/pipet_model/ocr_motor
+python3 -m gui.main
+```
+
+여기서 `python3` 는 **시스템 Python** 을 의미한다.
+
+### 4.2.2 GUI 내부 동작 절차
+
+1. GUI 실행
+2. `Controller` 생성
+3. 시리얼 포트 연결
+4. 리니어/볼륨 액추에이터 초기화
+5. 운영자 버튼 입력 대기
+
+이후 버튼별 동작:
+
+#### Capture Frame
+1. GUI가 worker 호출
+2. worker가 프레임 1장 캡처
+3. `state/last_frame.jpg` 저장
+4. GUI가 저장된 이미지를 다시 표시
+
+#### Detect ROIs
+1. GUI가 `--yolo` worker 호출
+2. worker가 프레임 캡처
+3. YOLO로 ROI 4개 검출
+4. `state/rois.json` 저장
+5. `state/last_yolo.jpg` 저장
+
+#### Read Current Volume
+1. GUI가 `--ocr` worker 호출
+2. worker가 프레임 캡처
+3. ROI를 기준으로 OCR 수행
+4. JSON으로 volume 반환
+5. GUI가 결과 표시
+
+#### Run To Target
+1. GUI가 장시간 worker 프로세스 시작
+2. worker가 현재 용량 판독
+3. 오차 기준으로 방향/세기/시간 계산
+4. worker가 JSON 명령 출력
+5. GUI가 시리얼로 실제 모터 구동
+6. 목표 근접 시 종료
+
+### 4.2.3 worker 단독 실행 예시
+
+conda 환경에서:
+
+```bash
+cd /Users/minwoo/Documents/GitHub/micro-pipet/pipet_model/ocr_motor
+conda run -n pipet_env python -u -m worker.worker --capture --camera=0
+conda run -n pipet_env python -u -m worker.worker --yolo --camera=0
+conda run -n pipet_env python -u -m worker.worker --ocr --camera=0
+conda run -n pipet_env python -u -m worker.worker --run-target --target=2500 --camera=0
+```
+
+PaddleOCR 경로 예시:
+
+```bash
+conda run -n pipet_env python -u -m worker.worker_paddle --ocr --camera=0 --ocr-auto-rois
+```
+
+---
+
+## 4.3 운용 시 사용 방법
+
+### 4.3.1 권장 운용 순서
+초기 장비 확인 시에는 아래 순서를 권장한다.
+
+1. GUI 실행
+2. 카메라 preview 확인
+3. `Capture Frame` 수행
+4. `Detect ROIs` 수행
+5. ROI 좌표가 정상인지 확인
+6. `Read Current Volume (OCR)` 수행
+7. OCR 값이 정상일 때 `Run To Target` 수행
+
+### 4.3.2 state 디렉터리 확인 포인트
+문제 발생 시 아래 파일부터 본다.
+
+- `ocr_motor/state/last_frame.jpg`
+  - 최근 캡처 프레임
+
+- `ocr_motor/state/last_yolo.jpg`
+  - YOLO ROI 시각화 결과
+
+- `ocr_motor/state/rois.json`
+  - OCR이 실제로 참고하는 ROI 좌표
+
+### 4.3.3 OCR 문제 발생 시 확인 순서
+
+1. `last_frame.jpg` 가 정상인지 확인
+2. `last_yolo.jpg` 에 ROI가 4개 맞는지 확인
+3. `rois.json` 좌표가 프레임 기준과 맞는지 확인
+4. TRT 모델 경로가 맞는지 확인
+5. conda env에서 `tensorrt`, `pycuda`, `torchvision`, `pillow` 설치 상태 확인
+
+### 4.3.4 PaddleOCR 경로 사용 시
+PaddleOCR은 기본 운영 경로가 아니라 대체/검증용 경로에 가깝다.
+
+- 기본 운영 경로는 TRT OCR로 보는 것이 자연스럽다
+- Paddle 경로는 디버깅, fallback, 테스트 용도로 보는 것이 안전하다
+
+---
+
+## 5. 인수인계를 위한 유의사항
+
+## 5.1 가장 중요한 운영 전제
+
+### 5.1.1 GUI와 worker는 같은 Python이 아니다
+가장 중요하다.
+
+- GUI: 시스템 Python
+- worker: conda env
+
+둘을 하나로 합치려고 하면 PyQt5 / CUDA / TensorRT 쪽에서 문제가 생길 가능성이 있다.
+
+### 5.1.2 실제 모터 구동 책임은 GUI에 있다
+이 부분을 혼동하면 안 된다.
+
+- `worker/control_worker.py` 는 제어 판단만 한다
+- 실제 `VolumeDCActuator.run()` / `stop()` 호출은 `gui/controller.py` 에 있다
+
+즉, run-to-target 디버깅은 항상 **worker와 GUI를 같이 봐야 한다**.
+
+### 5.1.3 ROI는 파일로 저장/재사용된다
+OCR은 매번 YOLO를 새로 돌리는 구조가 아니다.
+
+- YOLO가 `state/rois.json` 저장
+- OCR은 그 ROI를 재사용
+
+따라서 카메라 위치나 각도가 바뀌면 ROI를 다시 잡아야 한다.
+
+---
+
+## 5.2 현재 코드 기준 확인된 주의사항
+
+아래는 인수인계 관점에서 꼭 알아야 하는 현재 상태다.
+
+### 5.2.1 `PipettePanel` 과 `Controller` 연결 누락 가능성
+현재 `PipettePanel` 은 아래 메서드를 `Controller` 에 기대한다.
+
+- `pipetting_down`
+- `pipetting_up`
+- `tip_change_down`
+- `tip_change_up`
+- `volume_down`
+- `volume_up`
+- `linear_move`
+
+하지만 현재 `gui/controller.py` 에는 이 메서드들이 정의되어 있지 않다.  
+즉, **수동 제어 패널은 현재 코드 상태 그대로는 동작하지 않을 가능성이 높다**.
+
+인수인계 시 해야 할 일:
+
+1. 이 기능이 실제 운영에서 쓰였는지 확인
+2. 쓰였다면 누락된 메서드를 복구
+3. 안 쓰인다면 패널 비활성화 또는 제거 여부 검토
+
+### 5.2.2 `YoloPanel.show_fixed_rois()` 호출 대상 확인 필요
+현재 `YoloPanel.show_fixed_rois()` 는 `self.video_panel.show_pixmap(...)` 을 호출한다.  
+하지만 `VideoPanel` 에는 `show_pixmap()` 메서드가 없다.
+
+즉, 이 경로는 현재 코드 기준으로 문제가 있을 가능성이 있다.
+
+인수인계 시 확인할 것:
+
+1. 실제로 이 함수가 호출되는지
+2. 예전 `VideoPanel` 구현이 따로 있었는지
+3. `show_image()` 기반으로 바꾸는 것이 맞는지
+
+### 5.2.3 `TargetPanel.update_camera_frame()` 는 현재 미사용 가능성 높음
+`TargetPanel` 내부에 `self.camera_label.setPixmap(...)` 호출이 있으나,  
+현재 클래스에서 `camera_label` 을 만드는 코드가 없다.
+
+즉, 이 메서드는 예전 코드 잔재일 가능성이 높다.
+
+### 5.2.4 `test_ocr_only.py` 의 모델 경로는 절대경로 기반
+`worker/test_ocr_only.py` 에는 다음 절대경로가 남아 있다.
+
+```python
+OCR_PT_PATH = "/home/sixr/Desktop/pipet_model/ocr_motor/best_efficientnet_origin.pt"
+```
+
+현재 환경과 다를 수 있으므로 그대로는 동작하지 않을 가능성이 높다.
+
+### 5.2.5 README 구조 설명은 현재 코드와 일부 불일치
+기존 `ocr_motor/README.md` 안 구조 설명에는 다음처럼 현재와 다른 이름이 있다.
+
+- `motor_test_panel.py`
+- `ocr_worker.py`
+- `motor_worker.py`
+
+실제 인수인계는 README보다 **현재 디렉터리와 본 문서**를 기준으로 하는 것이 안전하다.
+
+---
+
+## 5.3 실제 인수인계 시 추천 전달 순서
+
+다음 순서로 설명하면 가장 빠르다.
+
+1. `gui/controller.py`
+2. `worker/worker.py`
+3. `worker/yolo_worker.py`
+4. `worker/ocr_trt.py`
+5. `worker/control_worker.py`
+6. `worker/serial_controller.py`
+7. `state/` 산출물 확인 방법
+8. 시스템 Python / conda env 분리 이유
+9. 현재 코드상 미완성/잔재 구간 설명
+
+---
+
+## 6. 참고 파일
+
+- 기존 실행 안내: `pipet_model/ocr_motor/README.md`
+- GUI 진입점: `pipet_model/ocr_motor/gui/main.py`
+- 핵심 컨트롤러: `pipet_model/ocr_motor/gui/controller.py`
+- 공용 worker 진입점: `pipet_model/ocr_motor/worker/worker.py`
+- 기본 OCR: `pipet_model/ocr_motor/worker/ocr_trt.py`
+- 대체 OCR: `pipet_model/ocr_motor/worker/ocr_paddle.py`
+- ROI 검출: `pipet_model/ocr_motor/worker/yolo_worker.py`
+- 시리얼 통신: `pipet_model/ocr_motor/worker/serial_controller.py`
+
+---
+
+## 7. 한 줄 요약
+이 프로젝트는 **시스템 Python GUI + conda worker + GUI가 소유한 시리얼 제어** 구조다.  
+인수인계 시에는 먼저 `Controller` 중심 흐름을 이해하고, 그다음 OCR/YOLO/state 파일/시리얼 계층 순서로 보는 것이 가장 빠르다.
