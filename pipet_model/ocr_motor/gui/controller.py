@@ -3,6 +3,7 @@
 import json
 import time
 import os
+import re
 import subprocess
 import threading
 from dataclasses import dataclass
@@ -48,15 +49,7 @@ class Controller(QObject):
         self.volume_linear = LinearActuator(self.serial, 0x0A)
         self.volume_dc = VolumeDCActuator(self.serial, 0x0C)
 
-        for aid in (0x0B, 0x0A):
-            self.serial.send_mightyzap_force_onoff(aid, 1)
-            time.sleep(0.1)
-            self.serial.send_mightyzap_set_speed(aid, 500)
-            time.sleep(0.1)
-            self.serial.send_mightyzap_set_current(aid, 300)
-            time.sleep(0.1)
-            self.serial.send_mightyzap_set_position(aid, 300)
-            time.sleep(0.1)
+        self._init_linear_actuators()
 
         self.run_state: Dict[str, Any] = {
             "running": False,
@@ -68,6 +61,35 @@ class Controller(QObject):
             "duty": 0,
             "status": "Idle",
         }
+
+    def _init_linear_actuators(self):
+        """GUI가 시리얼을 다시 잡았을 때 기본 선형 액추에이터 설정을 복원한다."""
+        for aid in (0x0B, 0x0A):
+            self.serial.send_mightyzap_force_onoff(aid, 1)
+            time.sleep(0.1)
+            self.serial.send_mightyzap_set_speed(aid, 500)
+            time.sleep(0.1)
+            self.serial.send_mightyzap_set_current(aid, 300)
+            time.sleep(0.1)
+            self.serial.send_mightyzap_set_position(aid, 300)
+            time.sleep(0.1)
+
+    def _release_gui_serial(self):
+        """외부 테스트 스크립트가 포트를 직접 사용할 수 있도록 GUI 시리얼을 해제한다."""
+        try:
+            self.volume_dc.stop()
+        except Exception:
+            pass
+        self.serial.close()
+
+    def _reconnect_gui_serial(self):
+        """외부 스크립트 종료 후 GUI가 다시 시리얼을 잡고 초기 상태를 복원한다."""
+        ser = getattr(self.serial, "ser", None)
+        if ser is not None and getattr(ser, "is_open", False):
+            return
+
+        self.serial.connect()
+        self._init_linear_actuators()
 
     def set_video_panel(self, panel):
         """worker 결과 이미지가 생길 때 preview를 갱신할 수 있도록 패널 참조를 저장한다."""
@@ -130,7 +152,7 @@ class Controller(QObject):
         return res
 
     def start_run_to_target(self, target: int, camera_index: int = 0) -> None:
-        """장시간 걸리는 run-to-target 루프를 별도 프로세스로 띄우고 상태를 구독한다."""
+        """Run To Target 버튼이 Paddle 테스트 스크립트를 실행하도록 연결한 진입점이다."""
         self.stop_run_to_target()
 
         # worker 첫 메시지를 기다리지 않고도 패널이 즉시 Running 상태를 보이게 한다.
@@ -146,10 +168,12 @@ class Controller(QObject):
         })
         self.run_state_updated.emit(dict(self.run_state))
 
+        # 이 경로는 테스트 스크립트가 시리얼 포트를 직접 열기 때문에 GUI 쪽 포트를 잠시 내려놓는다.
+        self._release_gui_serial()
+
         cmd = [
             "conda", "run", "-n", self.conda_env,
-            "python", "-u", "-m", "worker.worker",
-            "--run-target",
+            "python", "-u", "test/single_target_paddleOCR_test.py",
             f"--target={target}",
             f"--camera={camera_index}",
         ]
@@ -167,7 +191,7 @@ class Controller(QObject):
         threading.Thread(target=self._run_to_target_stderr_loop, daemon=True).start()
 
     def _run_to_target_stdout_loop(self):
-        """worker stdout의 단계별 JSON을 읽어 UI 상태 반영과 실제 모터 구동까지 처리한다."""
+        """Paddle 테스트 스크립트 stdout을 읽어 UI 상태를 가능한 범위까지 갱신한다."""
         proc = self.long_proc
         if not proc or not proc.stdout:
             return
@@ -180,61 +204,58 @@ class Controller(QObject):
             try:
                 msg = json.loads(line)
             except Exception:
-                # 혹시 stdout에 섞이면 여기 찍히게 됨
-                print("[WORKER][STDOUT-NONJSON]", line)
+                msg = None
+
+            if isinstance(msg, dict) and "success" in msg:
+                self.run_state.update({
+                    "running": False,
+                    "step": msg.get("steps", self.run_state["step"]),
+                    "current": msg.get("final_ul", self.run_state["current"]),
+                    "target": msg.get("target_ul", self.run_state["target"]),
+                    "error": (
+                        msg.get("target_ul", self.run_state["target"])
+                        - msg.get("final_ul", self.run_state["current"])
+                    ) if msg.get("final_ul") is not None else self.run_state["error"],
+                    "status": "Done" if msg.get("success") else msg.get("reason", "Failed"),
+                })
+                self.run_state_updated.emit(dict(self.run_state))
                 continue
 
-            cmd = msg.get("cmd")
-
-            if cmd == "volume":
-                # worker가 계산한 최신 상태를 먼저 UI에 반영해 진행 상황을 바로 볼 수 있게 한다.
+            step_match = re.search(r"\[STEP\s+(\d+)\]\s+cur=(\d+)\s+err=(-?\d+)", line)
+            if step_match:
+                step = int(step_match.group(1))
+                cur = int(step_match.group(2))
+                err = int(step_match.group(3))
                 self.run_state.update({
                     "running": True,
-                    "step": msg.get("step", 0),
-                    "current": msg.get("current", 0),
-                    "target": msg.get("target", self.run_state["target"]),
-                    "error": msg.get("error", 0),
-                    "direction": msg.get("direction", None),
-                    "duty": msg.get("duty", 0),
+                    "step": step,
+                    "current": cur,
+                    "error": err,
                     "status": "Running",
                 })
                 self.run_state_updated.emit(dict(self.run_state))
+                continue
 
-                # 시리얼 세션은 GUI가 쥐고 있으므로, 실제 모터 제어는 여기서 수행한다.
-                direction = int(msg["direction"])
-                duty = int(msg["duty"])
-                duration_ms = int(msg["duration_ms"])
-
-                self.volume_dc.run(direction=direction, duty=duty)
-                time.sleep(duration_ms / 1000.0)
-                self.volume_dc.stop()
-
-            elif cmd == "done":
+            target_match = re.search(r"\[TEST\]\s+target=(\d+)", line)
+            if target_match:
                 self.run_state.update({
-                    "running": False,
-                    "step": msg.get("step", self.run_state["step"]),
-                    "current": msg.get("current", self.run_state["current"]),
-                    "target": msg.get("target", self.run_state["target"]),
-                    "error": msg.get("error", 0),
-                    "status": "Done",
+                    "target": int(target_match.group(1)),
                 })
                 self.run_state_updated.emit(dict(self.run_state))
-                break
+                continue
 
-            elif cmd == "warn":
-                self.run_state.update({
-                    "running": False,
-                    "status": "Max iteration reached",
-                })
-                self.run_state_updated.emit(dict(self.run_state))
-                break
+            print("[PADDLE][STDOUT]", line)
 
         # 프로세스 종료 처리
         self.run_state["running"] = False
         self.run_state_updated.emit(dict(self.run_state))
+        try:
+            self._reconnect_gui_serial()
+        except Exception:
+            pass
 
     def _run_to_target_stderr_loop(self):
-        """기계 파싱용 stdout과 분리된 worker 로그를 터미널로 그대로 흘려보낸다."""
+        """테스트 스크립트 stderr 로그를 터미널에 그대로 전달한다."""
         proc = self.long_proc
         if not proc or not proc.stderr:
             return
@@ -250,12 +271,12 @@ class Controller(QObject):
             if self.run_state.get("status") == "Running" and self.run_state.get("step", 0) == 0:
                 self.run_state.update({
                     "running": False,
-                    "status": f"Worker exited (rc={rc})",
+                    "status": f"Paddle script exited (rc={rc})",
                 })
                 self.run_state_updated.emit(dict(self.run_state))
 
     def stop_run_to_target(self) -> None:
-        """중단 요청 시 worker 프로세스와 DC 모터 상태를 함께 정리한다."""
+        """중단 요청 시 테스트 스크립트를 종료하고 GUI 시리얼 연결을 복구한다."""
         if self.long_proc and self.long_proc.poll() is None:
             try:
                 self.long_proc.terminate()
@@ -264,6 +285,11 @@ class Controller(QObject):
 
         try:
             self.volume_dc.stop()
+        except Exception:
+            pass
+
+        try:
+            self._reconnect_gui_serial()
         except Exception:
             pass
 

@@ -1,5 +1,6 @@
 """단일 목표값 기준으로 PaddleOCR 경로를 검증할 때 사용하는 테스트 스크립트."""
 
+import argparse
 import subprocess
 import json
 import time
@@ -54,6 +55,26 @@ def ensure_volume_dc():
             actuator_id=0x0C,
         )
     return _volume_dc
+
+
+def cleanup_volume_dc():
+    """테스트 종료 시 열려 있는 시리얼 연결이 남지 않도록 정리한다."""
+    global _serial, _volume_dc
+
+    try:
+        if _volume_dc is not None:
+            _volume_dc.stop()
+    except Exception:
+        pass
+
+    try:
+        if _serial is not None:
+            _serial.close()
+    except Exception:
+        pass
+
+    _serial = None
+    _volume_dc = None
 
 
 def _run_worker_and_parse_ok(cmd, timeout_sec: int) -> int:
@@ -298,15 +319,27 @@ def single_target_test_paddle(
 
 
 if __name__ == "__main__":
-    ensure_dirs()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--target", type=int, default=None)
+    ap.add_argument("--camera", type=int, default=CAMERA_INDEX)
+    ap.add_argument("--rotate", type=int, default=ROTATE)
+    args = ap.parse_args()
 
-    calib = load_calibration()
-    if calib is None:
-        calib = run_calibration(CAMERA_INDEX, ROTATE)
+    try:
+        ensure_dirs()
 
-    # 보정 직후 임의 목표값 1건을 돌려 전체 흐름이 연결되는지만 확인한다.
-    import random
-    tgt = random.randrange(1000, 4501, 5)
+        calib = load_calibration()
+        if calib is None:
+            calib = run_calibration(args.camera, args.rotate)
 
-    res = single_target_test_paddle(tgt, calib, CAMERA_INDEX, ROTATE)
-    print(json.dumps(res, ensure_ascii=False, indent=2))
+        if args.target is None:
+            # 목표값이 없으면 기존 테스트 스크립트처럼 임의 목표값 1건을 사용한다.
+            import random
+            tgt = random.randrange(1000, 4501, 5)
+        else:
+            tgt = int(args.target)
+
+        res = single_target_test_paddle(tgt, calib, args.camera, args.rotate)
+        print(json.dumps(res, ensure_ascii=False))
+    finally:
+        cleanup_volume_dc()
