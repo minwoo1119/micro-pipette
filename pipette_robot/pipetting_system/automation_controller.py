@@ -46,7 +46,7 @@ class AutomationController:
           "로봇이 실제로 움직여야 하는 XY"의 대응을 맞추기 위한 규칙입니다.
           설치 방향이 바뀌면 이 부분/부호/장착각이 동시에 영향을 줍니다.
         - 로봇이 반대로 움직일 때는 보통 아래 순서로 점검합니다.
-          1) `RobotConfig.MOUNT_ANGLE_DEG` (실제 장착각과 일치?)
+          1) `RobotConfig.MOUNT_ANGLE_DEG` (실제 장착각과 일치하는지 확인)
           2) 축 스왑/부호(`dx_p, dy_p` 및 `execute_relative_move(-x_cam, y_cam, ...)` 호출부)
           3) 태그 회전 오프셋(`WellPlateConfig.TAG_*_OFFSET_DEG`)로 인한 웰 방향 틀어짐
         """
