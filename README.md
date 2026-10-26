@@ -22,8 +22,8 @@
 
 | 폴더 | 담당자 | 역할 |
 |---|---|---|
-| `pipet_model` | 이민우 | 피펫 용량 인식, 목표 용량 자동 보정, 액추에이터 제어 및 PyQt5 GUI |
-| `pipette_robot` | 정성윤 | AprilTag 비전, Well Plate 좌표 계산, UR 로봇 이동 및 피펫팅 시퀀스 |
+| `pipet_model` | [이민우](https://github.com/minwoo1119) | 피펫 용량 인식, 목표 용량 자동 보정, 액추에이터 제어 및 PyQt5 GUI |
+| `pipette_robot` | [정성윤](https://github.com/jsy0605) | AprilTag 비전, Well Plate 좌표 계산, UR 로봇 이동 및 피펫팅 시퀀스 |
 
 현재 코드 기준으로 두 하위 시스템은 각각 별도의 GUI와 실행 환경을 사용합니다.
 
@@ -269,5 +269,5 @@ python3 main.py
 
 ## Contributors
 
-- **이민우** — `pipet_model`: 비전 모델, OCR, 목표 용량 자동 보정 및 모터 제어
-- **정성윤** — `pipette_robot`: AprilTag 비전, ROS 2·MoveIt 2 연동 및 로봇 피펫팅 자동화
+- [**이민우**](https://github.com/minwoo1119) — `pipet_model`: 비전 모델, OCR, 목표 용량 자동 보정 및 모터 제어
+- [**정성윤**](https://github.com/jsy0605) — `pipette_robot`: AprilTag 비전, ROS 2·MoveIt 2 연동 및 로봇 피펫팅 자동화
