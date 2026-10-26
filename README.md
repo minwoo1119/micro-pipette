@@ -1,468 +1,273 @@
-# Industrial Anomaly Detection & Edge Deployment
+# Micro-Pipette Automation System
 
-산업용 비전 검사 환경을 가정하여 **PatchCore 기반 이상 탐지 모델을 개발하고, ONNX 및 TensorRT INT8 최적화를 거쳐 Jetson Orin Nano에 배포하는 End-to-End Edge AI 프로젝트**입니다.
+비전 인식과 로봇 제어를 결합한 **마이크로피펫 자동화 프로젝트**입니다.
 
-모델의 정확도뿐 아니라 실제 엣지 디바이스에서의 **Latency, FPS, Memory Usage, Image AUROC, Pixel AUROC**를 함께 측정하여 정확도와 추론 성능 간의 trade-off를 분석하는 것을 목표로 합니다.
+카메라 영상에서 마이크로피펫의 현재 용량을 인식하고 목표 용량까지 모터로 자동 보정하는 시스템과, AprilTag를 기준으로 Well Plate의 위치를 추정하여 UR 로봇의 피펫팅 동작을 수행하는 시스템으로 구성되어 있습니다.
 
----
+## 주요 기능
 
-## 1. Project Overview
+- YOLO 기반 마이크로피펫 숫자 영역(ROI) 검출
+- TensorRT EfficientNet 및 PaddleOCR 기반 용량 판독
+- 현재 용량과 목표 용량의 차이를 이용한 자동 보정
+- 시리얼 통신 기반 리니어 액추에이터 및 용량 조절 모터 제어
+- AprilTag 기반 위치 및 자세 추정
+- 카메라와 로봇 툴의 장착각을 고려한 좌표 변환
+- 4×6 Well Plate의 목표 웰(A1~D6) 자동 이동
+- ROS 2·MoveIt 2 기반 UR 로봇 IK 계산 및 궤적 제어
+- PyQt5 및 Tkinter 기반 운영 GUI
 
-산업 현장에서는 정상 데이터는 충분히 확보할 수 있지만 모든 불량 유형을 사전에 수집하기 어려운 경우가 많습니다.
+## 시스템 구성
 
-본 프로젝트에서는 이러한 상황을 가정하여 **정상 이미지만으로 학습 가능한 Unsupervised Anomaly Detection 모델인 PatchCore**를 사용합니다.
+이 저장소에는 서로 다른 역할을 담당하는 두 개의 하위 시스템이 포함되어 있습니다.
 
-전체 파이프라인은 다음과 같습니다.
+| 폴더 | 담당자 | 역할 |
+|---|---|---|
+| `pipet_model` | 이민우 | 피펫 용량 인식, 목표 용량 자동 보정, 액추에이터 제어 및 PyQt5 GUI |
+| `pipette_robot` | 정성윤 | AprilTag 비전, Well Plate 좌표 계산, UR 로봇 이동 및 피펫팅 시퀀스 |
 
-```text
-MVTec AD
-   ↓
-PatchCore
-   ↓
-PyTorch Evaluation
-   ↓
-ONNX Export
-   ↓
-TensorRT
-   ├── FP32
-   ├── FP16
-   └── INT8 PTQ
-   ↓
-C++ / OpenCV Runtime
-   ↓
-Jetson Orin Nano
-   ↓
-Latency / FPS / Memory / AUROC Benchmark
-```
+현재 코드 기준으로 두 하위 시스템은 각각 별도의 GUI와 실행 환경을 사용합니다.
 
----
-
-## 2. Goals
-
-- MVTec AD `bottle` 데이터셋 기반 산업용 이상 탐지 파이프라인 구현
-- PatchCore + WideResNet50-2 기반 정상 특징 학습
-- Image-level / Pixel-level anomaly detection 성능 평가
-- Ground Truth Mask와 Anomaly Heatmap 비교
-- PyTorch 모델의 ONNX 변환 및 출력 일치 검증
-- TensorRT FP32 / FP16 / INT8 엔진 비교
-- INT8 Post-Training Quantization 적용
-- Jetson Orin Nano에서 C++ / OpenCV 기반 실시간 추론 구현
-- 정확도 및 엣지 추론 성능 비교 분석
-
----
-
-## 3. System Architecture
+### 1. 피펫 용량 인식 및 보정
 
 ```text
-┌─────────────────────────────────────┐
-│        Model Development            │
-│        Google Colab GPU             │
-│                                     │
-│  MVTec AD                           │
-│      ↓                              │
-│  PatchCore                          │
-│  WideResNet50-2                     │
-│      ↓                              │
-│  Memory Bank / Coreset Sampling     │
-│      ↓                              │
-│  Image / Pixel AUROC                │
-│      ↓                              │
-│  ONNX Export                        │
-└──────────────────┬──────────────────┘
-                   │
-                model.onnx
-                   │
-                   ▼
-┌─────────────────────────────────────┐
-│         Edge Deployment             │
-│         Jetson Orin Nano            │
-│                                     │
-│  TensorRT                           │
-│  ├── FP32                           │
-│  ├── FP16                           │
-│  └── INT8 PTQ                       │
-│        ↓                            │
-│  C++ / OpenCV                       │
-│        ↓                            │
-│  Camera / Image Inference           │
-│        ↓                            │
-│  Benchmark                          │
-└─────────────────────────────────────┘
+Camera
+   ↓
+Frame Capture
+   ↓
+YOLO ROI Detection
+   ↓
+TensorRT OCR / PaddleOCR
+   ↓
+Current Volume
+   ↓
+Target Error Calculation
+   ↓
+Serial Motor Control
+   ↓
+Target Volume Adjustment
 ```
 
----
+`pipet_model`은 카메라로 피펫의 용량 표시부를 촬영하고, YOLO로 숫자 ROI를 검출한 뒤 OCR로 현재 용량을 판독합니다. 판독값과 목표값의 차이에 따라 용량 조절 모터를 구동하며, 피펫팅·팁 교체용 리니어 액추에이터도 함께 제어합니다.
 
-## 4. Tech Stack
+GUI와 추론 환경의 충돌을 줄이기 위해 다음과 같이 실행 환경을 분리합니다.
 
-### Model Development
+- 시스템 Python: PyQt5 GUI 및 시리얼 연결
+- Conda `pipet_env`: YOLO, OCR, TensorRT 및 worker 프로세스
 
-- Python
-- PyTorch
-- Anomalib
-- PatchCore
-- WideResNet50-2
-- MVTec AD
-- NumPy
-- Matplotlib
-- PIL
-- Google Colab GPU
-
-### Model Conversion / Optimization
-
-- ONNX
-- ONNX Runtime
-- TensorRT
-- INT8 Post-Training Quantization
-
-### Edge Deployment
-
-- NVIDIA Jetson Orin Nano
-- C++17
-- CUDA
-- TensorRT Runtime
-- OpenCV
-- CMake
-
----
-
-## 5. Development Environment
-
-현재 모델 개발은 **Mac + VS Code + Google Colab GPU** 환경에서 진행합니다.
+### 2. UR 로봇 피펫팅 자동화
 
 ```text
-Mac
- └── VS Code
-      └── Colab Extension
-           ↓
-      Google Colab GPU
+Alvium Camera
+   ↓
+AprilTag Detection / Pose Estimation
+   ↓
+Tag Centering and Coordinate Transform
+   ↓
+Well Position Calculation
+   ↓
+MoveIt 2 IK
+   ↓
+UR Robot Trajectory
+   ↓
+Pipetting Sequence
 ```
 
-현재 사용 중인 주요 환경은 다음과 같습니다.
+`pipette_robot`은 Alvium 카메라에서 AprilTag를 검출하고 태그 기준 좌표를 계산합니다. 카메라와 툴의 장착각을 보정한 뒤 4×6 Well Plate의 목표 웰로 UR 로봇을 이동시키며, 오프셋 이동·Z축 하강·상승·복귀로 구성된 피펫팅 시퀀스를 수행합니다.
 
-```text
-Python   : 3.13
-PyTorch  : 2.11.0 + CUDA 12.8
-Anomalib : 2.6.x
-NumPy    : 2.1.x
-Numba    : 0.61.x
-```
-
-> Colab 런타임의 패키지 버전은 변경될 수 있으므로 실제 실행 환경은 Notebook에서 다시 확인합니다.
-
----
-
-## 6. Project Structure
+## 프로젝트 구조
 
 ```text
 micro-pipette/
-│
-├── pipet_model/                     # 모델 개발 - 이민우
+├── pipet_model/                         # 이민우
+│   ├── 설명서.md                        # 모델·모터 시스템 인수인계 문서
 │   └── ocr_motor/
+│       ├── gui/                         # PyQt5 운영 GUI
+│       │   ├── main.py
+│       │   ├── main_window.py
+│       │   ├── controller.py
+│       │   └── panels/
+│       ├── worker/                      # 비전 추론 및 모터 제어 worker
+│       │   ├── worker.py
+│       │   ├── yolo_worker.py
+│       │   ├── ocr_trt.py
+│       │   ├── ocr_paddle.py
+│       │   ├── control_worker.py
+│       │   ├── serial_controller.py
+│       │   └── motor_controller.py
+│       ├── test/                        # OCR·캘리브레이션 테스트
+│       ├── models/                      # YOLO·OCR 모델 및 TensorRT 엔진
+│       ├── state/                       # 최근 프레임, ROI 및 검출 결과
+│       ├── requirements_gui.txt
+│       ├── requirements_worker.txt
+│       └── README.md
 │
-├── pipette_robot/                   # 로봇 시스템 - 정성윤
+├── pipette_robot/                       # 정성윤
+│   ├── 설명서.md                        # 로봇 시스템 인수인계 문서
 │   └── pipetting_system/
+│       ├── main.py                      # Tkinter GUI 진입점
+│       ├── automation_controller.py     # 자동화 및 피펫팅 시퀀스
+│       ├── robot_interface.py           # ROS 2·MoveIt 2 로봇 인터페이스
+│       ├── vision_module.py             # AprilTag 검출 및 포즈 추정
+│       ├── alvium_driver.py             # Alvium 카메라 드라이버
+│       └── config.py                    # 로봇·플레이트·제어 파라미터
 │
-├── notebooks/
-│   ├── mvtec_exploration.ipynb
-│   ├── patchcore_training.ipynb
-│   ├── anomaly_evaluation.ipynb
-│   └── model_export.ipynb
-│
-├── src/
-│   ├── train.py
-│   ├── evaluate.py
-│   └── export_onnx.py
-│
-├── jetson/
-│   ├── include/
-│   ├── src/
-│   ├── CMakeLists.txt
-│   └── README.md
-│
-├── datasets/
-├── models/
-├── outputs/
-│
-├── requirements.txt
-├── .gitignore
 └── README.md
 ```
 
-### 담당자
+## 기술 스택
 
-| 폴더 | 담당자 | 담당 영역 |
-|---|---|---|
-| `pipet_model` | 이민우 | 모델 개발 |
-| `pipette_robot` | 정성윤 | 로봇 시스템 개발 |
+### 피펫 용량 인식 및 모터 제어
 
-### Notebook 역할
+- Python 3.10+
+- PyQt5
+- PyTorch
+- Ultralytics YOLO
+- EfficientNet
+- TensorRT / PyCUDA
+- PaddleOCR
+- OpenCV
+- PySerial
 
-#### `mvtec_exploration.ipynb`
+### 로봇 피펫팅 자동화
 
-- MVTec AD `bottle` 데이터셋 구조 확인
-- Train / Test 데이터 분포 확인
-- 정상 / 이상 이미지 시각화
-- Ground Truth Mask 확인
-- Image-level / Pixel-level Anomaly 개념 확인
+- Python
+- ROS 2 Jazzy
+- MoveIt 2
+- Universal Robots ROS 2 Driver
+- OpenCV
+- pupil-apriltags
+- SciPy / NumPy
+- Tkinter
+- Allied Vision `vmbpy`
 
-#### `patchcore_training.ipynb`
+## 하드웨어 구성
 
-- PatchCore 모델 구성
-- WideResNet50-2 Feature Extractor 설정
-- 정상 이미지 특징 추출
-- Coreset Sampling
-- Memory Bank 생성
+- 마이크로피펫 및 용량 조절 모터
+- 피펫팅·팁 교체용 리니어 액추에이터
+- USB 카메라
+- Universal Robots 로봇(현재 설정 예시: UR5e)
+- Allied Vision Alvium 1800 U-511c 카메라
+- `tag36h11` AprilTag
+- 4×6 Well Plate
 
-#### `anomaly_evaluation.ipynb`
+## 실행 환경
 
-- Image AUROC 평가
-- Pixel AUROC 평가
-- Anomaly Score 분석
-- Ground Truth / Heatmap 비교
-- 정상 및 이상 유형별 성능 비교
+두 하위 시스템의 의존성과 GUI 구성이 다르므로 각각 별도로 환경을 준비합니다.
 
-#### `model_export.ipynb`
+### 피펫 용량 인식 및 모터 제어
 
-- 학습된 PatchCore 모델 로드
-- ONNX Export
-- ONNX Runtime 추론
-- PyTorch ↔ ONNX 출력 비교
+기준 환경은 Ubuntu 22.04 또는 24.04입니다. GUI는 시스템 Python으로, 추론 worker는 Conda 환경으로 실행합니다.
 
----
+#### 1. GUI 환경
 
-## 7. Dataset
-
-본 프로젝트에서는 **MVTec AD의 `bottle` 카테고리**를 사용합니다.
-
-```text
-bottle/
-├── train/
-│   └── good/
-│
-├── test/
-│   ├── good/
-│   ├── broken_large/
-│   ├── broken_small/
-│   └── contamination/
-│
-└── ground_truth/
-    ├── broken_large/
-    ├── broken_small/
-    └── contamination/
+```bash
+sudo apt update
+sudo apt install -y python3-pyqt5
 ```
 
-PatchCore는 학습 단계에서 **정상 이미지(`train/good`)만 사용**합니다.
+#### 2. Worker 환경
 
-테스트 시 정상 이미지와 여러 이상 유형을 함께 사용하여 이상 탐지 성능을 평가합니다.
-
----
-
-## 8. PatchCore Pipeline
-
-PatchCore는 일반적인 CNN처럼 Loss와 Backpropagation을 통해 모델 weight를 학습하지 않습니다.
-
-```text
-Normal Image
-    ↓
-Pre-trained WideResNet50-2
-    ↓
-Layer2 / Layer3 Features
-    ↓
-Patch Embedding
-    ↓
-Coreset Sampling
-    ↓
-Memory Bank
+```bash
+conda create -n pipet_env python=3.10 -y
+conda activate pipet_env
+pip install -r pipet_model/ocr_motor/requirements_worker.txt
 ```
 
-테스트 시에는 다음과 같이 동작합니다.
+#### 3. GUI 실행
 
-```text
-Test Image
-    ↓
-Patch Feature Extraction
-    ↓
-Nearest Neighbor Search
-    ↓
-Distance from Normal Memory Bank
-    ↓
-Anomaly Score
-+
-Anomaly Map
+저장소 루트에서 다음 명령을 실행합니다.
+
+```bash
+cd pipet_model/ocr_motor
+python3 -m gui.main
 ```
 
-현재 `bottle` 학습에서 생성된 Memory Bank 예시는 다음과 같습니다.
+기본 시리얼 포트는 `/dev/ttyUSB0`, baud rate는 `115200`, 카메라 인덱스는 `0`으로 설정되어 있습니다. 실제 장비 연결 환경이 다르면 관련 설정을 변경해야 합니다.
 
-```text
-Memory Bank Shape : [21401, 1536]
-Feature Precision : FP32
+> TensorRT 엔진은 생성한 GPU 및 TensorRT 환경에 영향을 받을 수 있습니다. 엔진이 현재 장치와 호환되지 않으면 저장된 ONNX 또는 PyTorch 모델을 이용해 해당 환경에서 다시 빌드해야 합니다.
+
+### UR 로봇 피펫팅 자동화
+
+Ubuntu와 ROS 2 Jazzy 환경을 기준으로 하며, UR Driver와 MoveIt 2가 먼저 실행되어야 합니다.
+
+Python 패키지의 최소 설치 예시는 다음과 같습니다.
+
+```bash
+pip install numpy scipy opencv-python pillow pupil-apriltags
 ```
 
-- `21401`: Coreset Sampling 이후 저장된 정상 patch feature 수
-- `1536`: 각 patch feature vector의 차원
+Alvium 카메라를 사용하려면 Allied Vision SDK와 `vmbpy`를 별도로 설치하고 장치 권한을 설정해야 합니다.
 
----
+#### 터미널 1: UR Driver
 
-## 9. Evaluation Metrics
-
-### Image AUROC
-
-이미지 전체가 정상인지 이상인지 구분하는 성능을 평가합니다.
-
-```text
-Prediction Score
-        ↕
-Ground Truth Label
+```bash
+source /opt/ros/jazzy/setup.bash
+ros2 launch ur_robot_driver ur_control.launch.py \
+  ur_type:=ur5e \
+  robot_ip:=192.168.64.106 \
+  launch_rviz:=false
 ```
 
-### Pixel AUROC
+#### 터미널 2: MoveIt 2
 
-이미지 내부에서 실제 이상 위치를 얼마나 정확하게 찾는지 평가합니다.
-
-```text
-Anomaly Map
-      ↕
-Ground Truth Mask
+```bash
+source /opt/ros/jazzy/setup.bash
+ros2 launch ur_moveit_config ur_moveit.launch.py \
+  ur_type:=ur5e \
+  launch_rviz:=true \
+  publish_robot_description_semantic:=true
 ```
 
----
+#### 터미널 3: GUI
 
-## 10. Edge Optimization Plan
-
-Jetson Orin Nano에서는 동일한 ONNX 모델을 기준으로 TensorRT 엔진을 생성하여 비교합니다.
-
-| Runtime | Precision | Image AUROC | Pixel AUROC | Latency | FPS | Memory |
-|---|---|---:|---:|---:|---:|---:|
-| PyTorch | FP32 | TBD | TBD | TBD | TBD | TBD |
-| TensorRT | FP32 | TBD | TBD | TBD | TBD | TBD |
-| TensorRT | FP16 | TBD | TBD | TBD | TBD | TBD |
-| TensorRT | INT8 | TBD | TBD | TBD | TBD | TBD |
-
-실측 결과가 확보되기 전까지 수치는 기입하지 않습니다.
-
----
-
-## 11. INT8 Quantization
-
-INT8 단계에서는 MVTec AD의 정상 학습 이미지 일부를 calibration dataset으로 사용하여 Post-Training Quantization을 수행합니다.
-
-```text
-Normal Calibration Images
-        ↓
-INT8 Calibration
-        ↓
-TensorRT INT8 Engine
-        ↓
-Accuracy / Latency Trade-off Analysis
+```bash
+source /opt/ros/jazzy/setup.bash
+cd pipette_robot/pipetting_system
+python3 main.py
 ```
 
-주요 확인 항목:
+`robot_ip`과 `ur_type`은 실제 장비 환경에 맞게 변경해야 합니다.
 
-- Image AUROC 변화
-- Pixel AUROC 변화
-- Latency 감소율
-- FPS 향상률
-- GPU Memory 절감률
-- Quantization에 민감한 연산 확인
+## 주요 설정
 
----
+### 피펫 용량 인식 시스템
 
-## 12. Jetson C++ Inference Pipeline
+- 카메라 및 worker 호출: `pipet_model/ocr_motor/gui/controller.py`
+- YOLO 모델과 ROI 처리: `pipet_model/ocr_motor/worker/yolo_worker.py`
+- TensorRT OCR: `pipet_model/ocr_motor/worker/ocr_trt.py`
+- 목표 용량 제어: `pipet_model/ocr_motor/worker/control_worker.py`
+- 시리얼 통신: `pipet_model/ocr_motor/worker/serial_controller.py`
 
-최종 C++ Runtime은 다음 구조를 목표로 합니다.
+### 로봇 시스템
 
-```text
-Camera / Image
-      ↓
-OpenCV
-      ↓
-Resize / Normalize
-      ↓
-CUDA Memory Transfer
-      ↓
-TensorRT Inference
-      ↓
-Anomaly Score / Map
-      ↓
-Heatmap Overlay
-      ↓
-Inspection Result
-```
+로봇, 카메라, AprilTag, Well Plate 및 피펫 오프셋 관련 값은 `pipette_robot/pipetting_system/config.py`에서 관리합니다.
 
-예상 프로젝트 구조:
+주요 튜닝 항목은 다음과 같습니다.
 
-```text
-jetson/
-├── include/
-│   ├── TensorRTInferencer.hpp
-│   └── Preprocessor.hpp
-│
-├── src/
-│   ├── main.cpp
-│   ├── TensorRTInferencer.cpp
-│   └── Preprocessor.cpp
-│
-└── CMakeLists.txt
-```
+- UR 로봇의 base 및 tool frame
+- 카메라·툴 장착각
+- AprilTag 크기와 회전 오프셋
+- Well 간격 및 태그에서 기준 웰까지의 거리
+- 태그 중앙 정렬 허용 오차
+- Well 이동 속도와 Z축 분할 이동 간격
+- 피펫 XY 오프셋 및 하강 거리
 
----
+## 운용 시 주의사항
 
-## 13. Benchmark Plan
+- 실제 로봇을 움직이기 전에 비상 정지 장치와 작업 공간을 확인해야 합니다.
+- 로봇을 저속으로 설정한 상태에서 좌표축 방향, 장착각, 오프셋을 먼저 검증해야 합니다.
+- AprilTag의 실제 크기와 코드의 `TAG_SIZE_M` 값이 다르면 거리 및 위치 추정 오차가 발생합니다.
+- `/compute_ik`, FollowJointTrajectory Action, `/joint_states`, `base_link` ↔ `tool0` TF가 준비되지 않으면 로봇 기능이 정상 동작하지 않습니다.
+- 자동 용량 보정 중에는 GUI와 외부 프로세스가 동일한 시리얼 포트를 동시에 사용하지 않도록 주의해야 합니다.
+- 모델 파일과 TensorRT 엔진은 용량이 크므로 배포 방식과 Git LFS 사용 여부를 확인하는 것이 좋습니다.
 
-최종적으로 다음 성능을 측정합니다.
+## 상세 문서
 
-### Accuracy
+- [피펫 용량 인식·모터 제어 인수인계 문서](pipet_model/설명서.md)
+- [OCR·모터 GUI 실행 안내](pipet_model/ocr_motor/README.md)
+- [UR 로봇 피펫팅 시스템 인수인계 문서](pipette_robot/설명서.md)
 
-- Image AUROC
-- Pixel AUROC
+## Contributors
 
-### Performance
-
-- Model inference latency
-- End-to-end latency
-- Throughput (FPS)
-
-### Resource Usage
-
-- GPU Memory
-- CPU Usage
-- GPU Utilization
-
-필요 시 Jetson의 power mode를 고정하여 동일 조건에서 비교합니다.
-
----
-
-## 14. Progress
-
-- [x] 프로젝트 구조 구성
-- [x] Google Colab GPU 개발 환경 구성
-- [x] Anomalib 환경 구성
-- [x] MVTec AD `bottle` 데이터셋 탐색
-- [x] Ground Truth Mask 시각화
-- [x] PatchCore 모델 구성
-- [x] 정상 특징 학습
-- [x] Coreset 기반 Memory Bank 생성
-- [ ] PatchCore 정량 성능 평가
-- [ ] Anomaly Heatmap 시각화
-- [ ] 정상 / 이상 유형별 Anomaly Score 분석
-- [ ] ONNX Export
-- [ ] PyTorch ↔ ONNX 결과 검증
-- [ ] Jetson 환경 구성
-- [ ] TensorRT FP32 Engine 생성
-- [ ] TensorRT FP16 Engine 생성
-- [ ] INT8 Calibration 및 Engine 생성
-- [ ] C++ TensorRT Runtime 구현
-- [ ] Jetson Benchmark
-- [ ] 최종 결과 비교 및 분석
-
----
-
-## 15. Expected Outcome
-
-본 프로젝트의 최종 목표는 단순한 이상 탐지 모델 구현이 아니라,
-
-> **산업용 이상 탐지 모델 개발부터 TensorRT INT8 최적화와 Jetson C++ 배포까지 연결되는 End-to-End Edge AI Pipeline을 구현하고 정량적으로 분석하는 것**
-
-입니다.
-
-특히 정확도뿐 아니라 실제 엣지 환경에서의 latency, throughput, memory usage를 함께 분석하여 모델 최적화가 실제 산업용 비전 시스템에 미치는 영향을 평가합니다.
+- **이민우** — `pipet_model`: 비전 모델, OCR, 목표 용량 자동 보정 및 모터 제어
+- **정성윤** — `pipette_robot`: AprilTag 비전, ROS 2·MoveIt 2 연동 및 로봇 피펫팅 자동화
